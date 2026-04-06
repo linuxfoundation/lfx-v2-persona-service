@@ -36,18 +36,84 @@ most relevant entry points into the LFX platform.
 
 ### Board Member
 
-Determined by membership in a Board group (committee).
+Determined by membership in a committee whose `category` is `"Board"` (the
+exact enum value used by the Committee Service and propagated to indexed
+documents).
 
-**Open questions / action items:**
+#### Detection strategy
 
-1. Investigate committee-type tag propagation to indexed `committee-member`
-   records.
-2. Return a membership stub and pass the buck to the UI to determine gating by
-   role — the Persona Service itself should not make access-control decisions.
+The `committee_member` OpenSearch document carries a
+`committee_category:<value>` tag (e.g. `committee_category:Board`) inherited
+from its parent committee at index time. This tag is confirmed present in the
+indexed schema; no additional propagation work is needed.
 
-**TBD:** A query-service capability to answer "does username X have relationship
-Y to object Z?" with support for filtering by committee (without exposing the
-`committee-member` pseudotype directly).
+Identity matching presents a complication: the `data.username` field on
+`committee_member` records is not reliably populated (it may be an empty
+string), while `data.email` is generally present. To maximise recall, the
+Persona Service issues **two queries in parallel** against the query service
+and merges the results by `committee_member_uid`:
+
+1. **Email match** — filter `object_type:committee_member` +
+   `committee_category:Board` + `email:<user-email>` (tag term lookup).
+2. **Username match** — filter `object_type:committee_member` +
+   `committee_category:Board` + `data.username:<username>` (structured field
+   filter, skipped if the caller's username is empty).
+
+Results from both legs are de-duplicated by `id` (the `committee_member` UUID
+exposed as `Resource.id` in the Query Service response) before returning to
+the caller.
+
+#### Local post-filter for username results
+
+Because the Query Service `filters` parameter issues a term clause against
+`data.username` (prefixed internally as `data.username:<value>`), the match
+may be overly liberal depending on analyzer behavior. After receiving results
+from the username leg, the Persona Service **must perform an exact local
+filter**, discarding any records where `data.username` does not exactly equal
+the requested username (case-insensitive). The email leg does not require this
+treatment because the `email:<value>` tag lookup is an exact term match
+against a structured tag value.
+
+#### What is returned
+
+The Query Service returns `Resource` objects with shape `{ type, id, data }`,
+where `data` is the raw committee member snapshot. For each de-duplicated
+result the Persona Service extracts and returns a stub containing:
+
+- `data.committee_uid` and `data.committee_name` — for UI navigation.
+- `data.project_uid` and `data.project_slug` (from the committee's tags,
+  denormalised onto the member at index time) — for project-scoped routing.
+- `id` (the committee member UUID) — for deep-linking.
+- `data.role.name` and `data.voting.status` — informational; the UI decides
+  how to present or gate based on these values.
+
+The Persona Service does **not** make access-control decisions based on role
+or voting status; it surfaces the data and defers gating entirely to the UI.
+
+#### Query Service API calls
+
+Both legs call `GET /query/resources?v=1` on the Query Service. The existing
+API surface is sufficient — no new endpoints or schema changes are required.
+
+**Email leg:**
+
+```
+type=committee_member
+tags_all=committee_category:Board, email:<user-email>
+```
+
+**Username leg** (skipped when username is empty):
+
+```
+type=committee_member
+tags_all=committee_category:Board
+filters=username:<username>
+```
+
+The `tags_all` parameter performs an AND match across all supplied tag values,
+ensuring only Board-category members are returned. The `filters` parameter
+issues a term clause on `data.username`. Results are then locally post-filtered
+for exact username equality before merging with the email leg results.
 
 ### Executive Director (ED)
 
