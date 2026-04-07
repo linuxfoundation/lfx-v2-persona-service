@@ -6,6 +6,8 @@ module github.com/linuxfoundation/lfx-v2-persona-service
 go 1.24.5
 
 require (
+	github.com/golang-jwt/jwt/v5 v5.3.0
+	github.com/google/uuid v1.6.0
 	github.com/nats-io/nats.go v1.45.0
 	github.com/remychantenay/slog-otel v1.3.4
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.64.0
@@ -36,7 +38,6 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/gohugoio/hashstructure v0.6.0 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.7 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect

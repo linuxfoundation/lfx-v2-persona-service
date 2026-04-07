@@ -357,7 +357,7 @@ LFX SSR app (`cdp.service.ts`), ported to Go:
 - **Token endpoint**: `${AUTH0_ISSUER_BASE_URL}/oauth/token`
 - **Credentials**: Auth0 M2M application **"LFX One"**
   (`AUTH0_CLIENT_ID` / `AUTH0_M2M_PRIVATE_BASE64_KEY`), which already holds the
-  `read:project-affiliations` and `read:maintainer-roles` grants against the
+  `read:members`, `read:project-affiliations`, and `read:maintainer-roles` grants against the
   CDP audience (see `grants_cdp.tf`). The service signs a `client_assertion`
   JWT with the private key instead of sending a client secret. For initial
   implementation, sharing these credentials with the SSR app is acceptable;

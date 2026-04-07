@@ -48,3 +48,39 @@ const (
 	SourceMailingList       = "mailing_list"
 	SourceMeetingAttendance = "meeting_attendance"
 )
+
+// CDPRolesExtra is the extra payload for a cdp_roles detection.
+// Roles are passed through as-is from CDP; the UI interprets them.
+type CDPRolesExtra struct {
+	ContributionCount int                    `json:"contributionCount"`
+	Roles             []CDPRolesExtraRole    `json:"roles"`
+}
+
+// CDPRolesExtraRole mirrors the role shape from the CDP project-affiliations response.
+type CDPRolesExtraRole struct {
+	ID          string  `json:"id"`
+	Role        string  `json:"role"`
+	StartDate   string  `json:"startDate"`
+	EndDate     *string `json:"endDate"`
+	RepoURL     string  `json:"repoUrl"`
+	RepoFileURL string  `json:"repoFileUrl"`
+}
+
+// MergeProjects merges detections from src into dst, de-duplicating by ProjectUID.
+// Projects that exist in dst get additional detections appended; new projects
+// are added to the end.
+func MergeProjects(dst, src []Project) []Project {
+	idx := make(map[string]int, len(dst))
+	for i, p := range dst {
+		idx[p.ProjectUID] = i
+	}
+	for _, p := range src {
+		if i, ok := idx[p.ProjectUID]; ok {
+			dst[i].Detections = append(dst[i].Detections, p.Detections...)
+		} else {
+			idx[p.ProjectUID] = len(dst)
+			dst = append(dst, p)
+		}
+	}
+	return dst
+}

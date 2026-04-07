@@ -15,6 +15,7 @@ import (
 
 	"github.com/linuxfoundation/lfx-v2-persona-service/internal/config"
 	"github.com/linuxfoundation/lfx-v2-persona-service/internal/domain/port"
+	"github.com/linuxfoundation/lfx-v2-persona-service/internal/infrastructure/cdp"
 	"github.com/linuxfoundation/lfx-v2-persona-service/internal/infrastructure/nats"
 	"github.com/linuxfoundation/lfx-v2-persona-service/internal/service"
 	"github.com/linuxfoundation/lfx-v2-persona-service/pkg/constants"
@@ -22,13 +23,14 @@ import (
 
 var (
 	natsClient *nats.NATSClient
+	appConfig  config.Config
 	natsDoOnce sync.Once
 )
 
 func natsInit(ctx context.Context) {
 
 	natsDoOnce.Do(func() {
-		cfg := config.Load()
+		appConfig = config.Load()
 
 		natsTimeout := os.Getenv("NATS_TIMEOUT")
 		if natsTimeout == "" {
@@ -58,7 +60,7 @@ func natsInit(ctx context.Context) {
 		}
 
 		natsConfig := nats.Config{
-			URL:           cfg.NATSURL,
+			URL:           appConfig.NATSURL,
 			Timeout:       natsTimeoutDuration,
 			MaxReconnect:  natsMaxReconnectInt,
 			ReconnectWait: natsReconnectWaitDuration,
@@ -91,8 +93,21 @@ func QueueSubscriptions(ctx context.Context) error {
 
 	natsInit(ctx)
 
+	// Build handler options based on config.
+	var handlerOpts []service.PersonaHandlerOption
+
+	if appConfig.CDPEnabled {
+		cdpClient, cdpCache, err := newCDPClient(ctx)
+		if err != nil {
+			slog.ErrorContext(ctx, "failed to create CDP client — CDP sources will be disabled", "error", err)
+		} else {
+			handlerOpts = append(handlerOpts, service.WithCDP(cdpClient, cdpCache))
+			slog.InfoContext(ctx, "CDP source enabled")
+		}
+	}
+
 	messageHandlerService := &MessageHandlerService{
-		messageHandler: service.NewPersonaHandler(),
+		messageHandler: service.NewPersonaHandler(handlerOpts...),
 	}
 
 	client := getNATSClient()
@@ -117,6 +132,37 @@ func QueueSubscriptions(ctx context.Context) error {
 
 	slog.DebugContext(ctx, "NATS subscriptions started successfully")
 	return nil
+}
+
+// newCDPClient creates a CDP API client and cache from the loaded config.
+func newCDPClient(ctx context.Context) (*cdp.Client, *cdp.Cache, error) {
+	tokenProv, err := cdp.NewTokenProvider(cdp.TokenProviderConfig{
+		IssuerBaseURL:    appConfig.Auth0IssuerBaseURL,
+		ClientID:         appConfig.Auth0ClientID,
+		Audience:         appConfig.CDPAudience,
+		PrivateKeyBase64: appConfig.Auth0M2MPrivateBase64Key,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("create CDP token provider: %w", err)
+	}
+
+	client := cdp.NewClient(cdp.ClientConfig{
+		BaseURL:   appConfig.CDPBaseURL,
+		TokenProv: tokenProv,
+	})
+
+	// Use the persona-cache KV store if available.
+	var cache *cdp.Cache
+	kvStore, ok := natsClient.GetKVStore(constants.KVBucketNamePersonaCache)
+	if ok {
+		cache = cdp.NewCache(kvStore)
+		slog.InfoContext(ctx, "CDP cache enabled via NATS KV")
+	} else {
+		cache = cdp.NewCache(nil)
+		slog.WarnContext(ctx, "CDP cache disabled — persona-cache KV bucket not available")
+	}
+
+	return client, cache, nil
 }
 
 // getNATSClient returns the initialized NATS client.
