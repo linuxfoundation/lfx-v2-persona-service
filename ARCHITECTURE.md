@@ -52,6 +52,8 @@ Queue group: `lfx.personas-api.queue`
 
 The caller issues a NATS request/reply on this subject and awaits a single reply on the auto-generated inbox. The service subscribes with a queue group so that multiple instances load-balance automatically.
 
+**Timeout / deadline budget:** The recommended caller timeout is **5 seconds**. Internally, the service fans out all upstream calls concurrently and enforces a shared context deadline so that slow or unresponsive upstream systems do not block the reply beyond this budget. If the overall deadline is exceeded before all sources respond, partial results from sources that have already returned are used and the remainder are treated as empty (see `error` handling below).
+
 ### Request
 
 ```json
@@ -145,7 +147,7 @@ One entry per unique `project_uid`. A project that matches via multiple sources 
 
 ```typescript
 {
-  contributionCount: number;   // from Snowflake via Source 1
+  contributionCount: number;   // from CDP /project-affiliations (Source 2)
   roles: {
     id: string;
     role: string;
@@ -458,10 +460,6 @@ Identity matching uses the confirmed field names from the indexed schema:
 A local exact post-filter is required on the username leg results for the
 same reason as all other `filters`-based lookups.
 
-**Project resolution:** The `groupsio_member` record does not carry
-`project_uid` or `project_slug` directly. The record's `parent_refs`
-contains `mailing_list:<id>` and `data.mailing_list_uid` identifies the
-parent mailing list, but the project relationship is one level further up.
 **Project resolution (unresolved — decision required):** The
 `groupsio_member` indexed record does not carry `project_uid` or
 `project_slug`. The record identifies its parent mailing list via
@@ -597,6 +595,36 @@ worth the cost. Below it, the data is fresh enough that the overhead is
 not justified. The intent is that most requests hit the < 10 minute
 branch during active UI sessions, and the background refresh keeps the
 cache warm for the next session without blocking the response.
+
+## Configuration
+
+All configuration is injected via environment variables. Variable names below follow the convention used by other LFX v2 services.
+
+| Variable | Required | Notes |
+|----------|----------|-------|
+| `NATS_URL` | yes | NATS server URL (e.g. `nats://nats:4222`). |
+| `AUTH0_ISSUER_BASE_URL` | CDP only | Auth0 tenant base URL; used to construct the `/oauth/token` endpoint for M2M token requests. |
+| `AUTH0_CLIENT_ID` | CDP only | Auth0 client ID for the LFX One M2M application. |
+| `AUTH0_CLIENT_SECRET` | CDP only | Corresponding client secret. |
+| `CDP_AUDIENCE` | CDP only | Auth0 audience string for the CDP API. |
+| `CDP_BASE_URL` | CDP only | Base URL for the CDP API (e.g. `https://api-gw.platform.linuxfoundation.org/cdp`). |
+| `SNOWFLAKE_ACCOUNT` | Snowflake only | Snowflake account identifier. |
+| `SNOWFLAKE_USER` | Snowflake only | Snowflake user (service account). |
+| `SNOWFLAKE_ROLE` | Snowflake only | Snowflake role to assume. |
+| `SNOWFLAKE_DATABASE` | Snowflake only | Snowflake database name. |
+| `SNOWFLAKE_WAREHOUSE` | Snowflake only | Snowflake virtual warehouse. |
+| `SNOWFLAKE_API_KEY` | Snowflake only | RSA private key (PEM) for Snowflake JWT auth. |
+| `QUERY_SERVICE_URL` | yes | Base URL of the Query Service (e.g. `http://query-service`). |
+
+### Autodegradation
+
+The CDP and Snowflake credential groups are **optional**. If any variable in a group is absent or empty at startup, the service logs a warning and disables that capability entirely for the lifetime of the process — it does not fail to start. Requests are served using only the sources that are available:
+
+- **No CDP credentials** — Sources 1 (`cdp_activity`) and 2 (`cdp_roles`) are skipped. Sources 3–6 and the Board Member / ED / Committee detections are unaffected.
+- **No Snowflake credentials** — Source 1 (`cdp_activity`) is skipped. All other sources are unaffected.
+- **Neither** — the service runs with Query Service-based sources only (Board Member, ED, Community Sources 3–6). This is the expected configuration for local development.
+
+This design means a developer can run the service locally with only `NATS_URL` and `QUERY_SERVICE_URL` configured and still exercise the majority of the code paths.
 
 ## Data flow
 
