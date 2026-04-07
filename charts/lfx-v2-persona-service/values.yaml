@@ -1,0 +1,143 @@
+# Copyright The Linux Foundation and each contributor to LFX.
+# SPDX-License-Identifier: MIT
+---
+# replicaCount is the number of replicas for the deployment (overridden via Argo for dev/staging/prod)
+replicaCount: 1
+
+# podAnnotations are additional annotations applied to the pod template.
+podAnnotations: {}
+
+# podLabels are additional labels applied to the pod template.
+podLabels: {}
+
+# podDisruptionBudget configures a PodDisruptionBudget for the deployment.
+# Only one of minAvailable or maxUnavailable may be set (not both).
+podDisruptionBudget:
+  enabled: false
+  # minAvailable: 1
+  # maxUnavailable: 1
+
+image:
+  repository: ghcr.io/linuxfoundation/lfx-v2-persona-service/server
+  # tag is the container image tag (overrides appVersion from Chart.yaml)
+  tag: ""
+  # pullPolicy is the image pull policy
+  pullPolicy: IfNotPresent
+
+# service is the configuration for the Kubernetes service
+service:
+  # port is the service port
+  port: 8080
+
+# resources is the configuration for resource requests and limits
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+nats:
+  # url is the URL of the NATS server
+  url: nats://lfx-platform-nats.lfx.svc.cluster.local:4222
+
+  # persona_cache_kv_bucket is the configuration for the NATS KV bucket
+  # used for caching CDP and Snowflake data
+  persona_cache_kv_bucket:
+    # creation is a boolean to determine if the KV bucket should be created via the helm chart.
+    creation: true
+    # keep is a boolean to determine if the KV bucket should be preserved during helm uninstall
+    keep: true
+    # name is the name of the KV bucket
+    name: persona-cache
+    # history is the number of history entries to keep
+    history: 1
+    # storage is the storage type for the KV bucket
+    storage: file
+    # maxValueSize is the maximum size of a value in the KV bucket
+    maxValueSize: 1048576  # 1MB
+    # maxBytes is the maximum number of bytes in the KV bucket
+    maxBytes: 104857600  # 100MB
+    # compression is a boolean to determine if the KV bucket should be compressed
+    compression: true
+    # ttl is the time-to-live for entries in the bucket (24 hours per architecture spec)
+    ttl: 24h
+
+# serviceAccount is the configuration for the Kubernetes service account
+serviceAccount:
+  # create specifies whether a service account should be created
+  create: true
+  # name is the name of the service account to use.
+  name: ""
+  # annotations to add to the service account (e.g. for external-secrets or IRSA)
+  annotations: {}
+  # automountServiceAccountToken is a boolean to determine if the service account token should be automatically mounted
+  automountServiceAccountToken: true
+
+# app is the configuration for the application
+app:
+  # environment is the configuration for the application environment
+  # Each variable supports either a static value or a valueFrom (for secrets).
+  # Example using ExternalSecret/SecretKeyRef:
+  #   AUTH0_M2M_PRIVATE_BASE64_KEY:
+  #     valueFrom:
+  #       secretKeyRef:
+  #         name: persona-service-secrets
+  #         key: auth0-m2m-private-key
+  environment:
+    # NATS Configuration (required)
+    NATS_URL:
+      value: nats://lfx-platform-nats.lfx.svc.cluster.local:4222
+
+    # Query Service — either QUERY_SERVICE_URL (direct) or LFX_BASE_URL + LFX_AUDIENCE (API gateway)
+    QUERY_SERVICE_URL:
+      value: null
+    LFX_BASE_URL:
+      value: null
+    LFX_AUDIENCE:
+      value: null
+
+    # Auth0 M2M configuration (shared by CDP and LFX API gateway)
+    AUTH0_ISSUER_BASE_URL:
+      value: null
+    AUTH0_CLIENT_ID:
+      value: null
+    AUTH0_M2M_PRIVATE_BASE64_KEY:
+      value: null
+
+    # CDP configuration (optional — autodegrades when absent)
+    CDP_AUDIENCE:
+      value: null
+    CDP_BASE_URL:
+      value: null
+
+    # Snowflake configuration (optional — autodegrades when absent)
+    SNOWFLAKE_ACCOUNT:
+      value: null
+    SNOWFLAKE_USER:
+      value: null
+    SNOWFLAKE_ROLE:
+      value: null
+    SNOWFLAKE_DATABASE:
+      value: null
+    SNOWFLAKE_WAREHOUSE:
+      value: null
+    SNOWFLAKE_API_KEY:
+      value: null
+
+  # extraEnv allows injecting additional environment variables
+  extraEnv: []
+
+  # otel is the configuration for OpenTelemetry tracing
+  otel:
+    serviceName: ""
+    serviceVersion: ""
+    protocol: "grpc"
+    endpoint: ""
+    insecure: "false"
+    tracesExporter: "none"
+    tracesSampleRatio: "1.0"
+    metricsExporter: "none"
+    logsExporter: "none"
+    propagators: "tracecontext,baggage,jaeger"
