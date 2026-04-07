@@ -14,6 +14,12 @@ const (
 	QueryServiceURLEnvKey = "QUERY_SERVICE_URL"
 )
 
+// Environment variable keys for LFX API gateway (alternative to QUERY_SERVICE_URL).
+const (
+	LFXBaseURLEnvKey  = "LFX_BASE_URL"
+	LFXAudienceEnvKey = "LFX_AUDIENCE"
+)
+
 // Environment variable keys for CDP (optional group).
 const (
 	Auth0IssuerBaseURLEnvKey       = "AUTH0_ISSUER_BASE_URL"

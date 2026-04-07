@@ -8,47 +8,132 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
+	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/clientcredentials"
 )
 
-// TokenProvider manages Auth0 M2M access tokens using private key JWT
-// (client assertion). Tokens are cached in-process with a 5-minute buffer
-// before expiry.
-type TokenProvider struct {
-	issuerBaseURL string
-	clientID      string
-	audience      string
-	privateKey    *rsa.PrivateKey
-	httpClient    *http.Client
+// tokenExpiryBuffer is subtracted from the token expiry so we refresh early.
+const tokenExpiryBuffer = 5 * time.Minute
 
-	mu          sync.RWMutex
-	cachedToken string
-	expiresAt   time.Time
+// TokenProvider manages Auth0 M2M access tokens using private key JWT
+// (client assertion). Tokens are cached in-process via oauth2.ReuseTokenSource
+// with a 5-minute early-expiry buffer.
+type TokenProvider struct {
+	tokenSource oauth2.TokenSource
 }
 
 // TokenProviderConfig holds the configuration for creating a TokenProvider.
 type TokenProviderConfig struct {
-	IssuerBaseURL       string
-	ClientID            string
-	Audience            string
-	PrivateKeyBase64    string
-	HTTPClient          *http.Client
+	IssuerBaseURL    string
+	ClientID         string
+	Audience         string
+	Scopes           string // space-separated scopes to request
+	PrivateKeyBase64 string
 }
 
 // NewTokenProvider creates a TokenProvider by decoding the base64 private key.
 func NewTokenProvider(cfg TokenProviderConfig) (*TokenProvider, error) {
-	keyBytes, err := base64.StdEncoding.DecodeString(cfg.PrivateKeyBase64)
+	privateKey, err := decodePrivateKey(cfg.PrivateKeyBase64)
+	if err != nil {
+		return nil, err
+	}
+
+	tokenURL := strings.TrimRight(cfg.IssuerBaseURL, "/") + "/oauth/token"
+
+	var scopes []string
+	if cfg.Scopes != "" {
+		scopes = strings.Split(cfg.Scopes, " ")
+	}
+
+	src := &assertionTokenSource{
+		clientID:   cfg.ClientID,
+		audience:   cfg.Audience,
+		tokenURL:   tokenURL,
+		scopes:     scopes,
+		privateKey: privateKey,
+	}
+
+	return &TokenProvider{
+		tokenSource: oauth2.ReuseTokenSourceWithExpiry(nil, src, tokenExpiryBuffer),
+	}, nil
+}
+
+// Token returns a valid access token, using the cache when possible.
+func (tp *TokenProvider) Token(ctx context.Context) (string, error) {
+	tok, err := tp.tokenSource.Token()
+	if err != nil {
+		return "", err
+	}
+	return tok.AccessToken, nil
+}
+
+// assertionTokenSource implements oauth2.TokenSource by signing a fresh
+// client_assertion JWT and exchanging it via the client_credentials grant.
+type assertionTokenSource struct {
+	clientID   string
+	audience   string
+	tokenURL   string
+	scopes     []string
+	privateKey *rsa.PrivateKey
+}
+
+func (s *assertionTokenSource) Token() (*oauth2.Token, error) {
+	assertion, err := s.signAssertion()
+	if err != nil {
+		return nil, fmt.Errorf("sign client assertion: %w", err)
+	}
+
+	cfg := clientcredentials.Config{
+		ClientID:  s.clientID,
+		TokenURL:  s.tokenURL,
+		Scopes:    s.scopes,
+		AuthStyle: oauth2.AuthStyleInParams,
+		EndpointParams: url.Values{
+			"audience":              {s.audience},
+			"client_assertion_type": {"urn:ietf:params:oauth:client-assertion-type:jwt-bearer"},
+			"client_assertion":      {assertion},
+		},
+	}
+
+	tok, err := cfg.Token(context.Background())
+	if err != nil {
+		slog.Error("Auth0 token request failed", "error", err, "audience", s.audience)
+		return nil, err
+	}
+
+	slog.Debug("token refreshed",
+		"audience", s.audience,
+		"expires", tok.Expiry,
+	)
+
+	return tok, nil
+}
+
+func (s *assertionTokenSource) signAssertion() (string, error) {
+	now := time.Now()
+	claims := jwt.RegisteredClaims{
+		Issuer:    s.clientID,
+		Subject:   s.clientID,
+		Audience:  jwt.ClaimStrings{s.tokenURL},
+		ExpiresAt: jwt.NewNumericDate(now.Add(5 * time.Minute)),
+		IssuedAt:  jwt.NewNumericDate(now),
+		ID:        uuid.NewString(),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	return token.SignedString(s.privateKey)
+}
+
+func decodePrivateKey(b64 string) (*rsa.PrivateKey, error) {
+	keyBytes, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {
 		return nil, fmt.Errorf("decode private key base64: %w", err)
 	}
@@ -58,127 +143,20 @@ func NewTokenProvider(cfg TokenProviderConfig) (*TokenProvider, error) {
 		return nil, fmt.Errorf("no PEM block found in decoded private key")
 	}
 
-	var privateKey *rsa.PrivateKey
 	switch block.Type {
 	case "RSA PRIVATE KEY":
-		privateKey, err = x509.ParsePKCS1PrivateKey(block.Bytes)
+		return x509.ParsePKCS1PrivateKey(block.Bytes)
 	case "PRIVATE KEY":
 		key, parseErr := x509.ParsePKCS8PrivateKey(block.Bytes)
 		if parseErr != nil {
 			return nil, fmt.Errorf("parse PKCS8 private key: %w", parseErr)
 		}
-		var ok bool
-		privateKey, ok = key.(*rsa.PrivateKey)
+		rsaKey, ok := key.(*rsa.PrivateKey)
 		if !ok {
 			return nil, fmt.Errorf("PKCS8 key is not RSA")
 		}
+		return rsaKey, nil
 	default:
 		return nil, fmt.Errorf("unsupported PEM block type: %s", block.Type)
 	}
-	if err != nil {
-		return nil, fmt.Errorf("parse private key: %w", err)
-	}
-
-	httpClient := cfg.HTTPClient
-	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 10 * time.Second}
-	}
-
-	return &TokenProvider{
-		issuerBaseURL: strings.TrimRight(cfg.IssuerBaseURL, "/"),
-		clientID:      cfg.ClientID,
-		audience:      cfg.Audience,
-		privateKey:    privateKey,
-		httpClient:    httpClient,
-	}, nil
-}
-
-// Token returns a valid access token, using the cache when possible.
-func (tp *TokenProvider) Token(ctx context.Context) (string, error) {
-	tp.mu.RLock()
-	if tp.cachedToken != "" && time.Now().Before(tp.expiresAt) {
-		token := tp.cachedToken
-		tp.mu.RUnlock()
-		return token, nil
-	}
-	tp.mu.RUnlock()
-
-	return tp.refresh(ctx)
-}
-
-func (tp *TokenProvider) refresh(ctx context.Context) (string, error) {
-	tp.mu.Lock()
-	defer tp.mu.Unlock()
-
-	// Double-check after acquiring write lock.
-	if tp.cachedToken != "" && time.Now().Before(tp.expiresAt) {
-		return tp.cachedToken, nil
-	}
-
-	tokenURL := tp.issuerBaseURL + "/oauth/token"
-
-	// Build client assertion JWT.
-	now := time.Now()
-	claims := jwt.RegisteredClaims{
-		Issuer:    tp.clientID,
-		Subject:   tp.clientID,
-		Audience:  jwt.ClaimStrings{tokenURL},
-		ExpiresAt: jwt.NewNumericDate(now.Add(5 * time.Minute)),
-		IssuedAt:  jwt.NewNumericDate(now),
-		ID:        uuid.NewString(),
-	}
-	assertion := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-	signedAssertion, err := assertion.SignedString(tp.privateKey)
-	if err != nil {
-		return "", fmt.Errorf("sign client assertion: %w", err)
-	}
-
-	body := fmt.Sprintf(
-		"grant_type=client_credentials&client_id=%s&client_assertion_type=%s&client_assertion=%s&audience=%s&scope=%s",
-		tp.clientID,
-		"urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
-		signedAssertion,
-		tp.audience,
-		"read:members read:project-affiliations read:maintainer-roles",
-	)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("create token request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := tp.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("token request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("read token response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		slog.ErrorContext(ctx, "Auth0 token request failed",
-			"status", resp.StatusCode,
-			"body", string(respBody),
-		)
-		return "", fmt.Errorf("token request returned %d", resp.StatusCode)
-	}
-
-	var tokenResp TokenResponse
-	if err := json.Unmarshal(respBody, &tokenResp); err != nil {
-		return "", fmt.Errorf("unmarshal token response: %w", err)
-	}
-
-	// Cache with 5-minute buffer before expiry.
-	tp.cachedToken = tokenResp.AccessToken
-	tp.expiresAt = now.Add(time.Duration(tokenResp.ExpiresIn-300) * time.Second)
-
-	slog.DebugContext(ctx, "CDP token refreshed",
-		"expires_in", tokenResp.ExpiresIn,
-	)
-
-	return tp.cachedToken, nil
 }

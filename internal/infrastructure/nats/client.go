@@ -78,6 +78,19 @@ func (c *NATSClient) GetKVStore(bucketName string) (jetstream.KeyValue, bool) {
 	return kvStore, exists
 }
 
+// Request sends a NATS request and waits for a reply.
+func (c *NATSClient) Request(ctx context.Context, subject string, data []byte) ([]byte, error) {
+	if err := c.IsReady(ctx); err != nil {
+		return nil, err
+	}
+
+	msg, err := c.conn.RequestWithContext(ctx, subject, data)
+	if err != nil {
+		return nil, err
+	}
+	return msg.Data, nil
+}
+
 // SubscribeWithTransportMessenger subscribes to a subject with proper TransportMessenger handling.
 func (c *NATSClient) SubscribeWithTransportMessenger(ctx context.Context, subject string, queueName string, handler func(context.Context, port.TransportMessenger)) (*nats.Subscription, error) {
 

@@ -17,6 +17,7 @@ import (
 	"github.com/linuxfoundation/lfx-v2-persona-service/internal/domain/port"
 	"github.com/linuxfoundation/lfx-v2-persona-service/internal/infrastructure/cdp"
 	"github.com/linuxfoundation/lfx-v2-persona-service/internal/infrastructure/nats"
+	"github.com/linuxfoundation/lfx-v2-persona-service/internal/infrastructure/query"
 	"github.com/linuxfoundation/lfx-v2-persona-service/internal/service"
 	"github.com/linuxfoundation/lfx-v2-persona-service/pkg/constants"
 )
@@ -96,6 +97,15 @@ func QueueSubscriptions(ctx context.Context) error {
 	// Build handler options based on config.
 	var handlerOpts []service.PersonaHandlerOption
 
+	// Query Service client — either direct URL or via LFX API gateway.
+	queryClient, queryErr := newQueryClient(ctx)
+	if queryErr != nil {
+		slog.ErrorContext(ctx, "failed to create Query Service client — Query Service sources will be disabled", "error", queryErr)
+	} else if queryClient != nil {
+		handlerOpts = append(handlerOpts, service.WithQueryService(queryClient, natsClient))
+		slog.InfoContext(ctx, "Query Service sources enabled")
+	}
+
 	if appConfig.CDPEnabled {
 		cdpClient, cdpCache, err := newCDPClient(ctx)
 		if err != nil {
@@ -140,6 +150,7 @@ func newCDPClient(ctx context.Context) (*cdp.Client, *cdp.Cache, error) {
 		IssuerBaseURL:    appConfig.Auth0IssuerBaseURL,
 		ClientID:         appConfig.Auth0ClientID,
 		Audience:         appConfig.CDPAudience,
+		Scopes:           "read:members read:project-affiliations read:maintainer-roles",
 		PrivateKeyBase64: appConfig.Auth0M2MPrivateBase64Key,
 	})
 	if err != nil {
@@ -163,6 +174,45 @@ func newCDPClient(ctx context.Context) (*cdp.Client, *cdp.Cache, error) {
 	}
 
 	return client, cache, nil
+}
+
+// newQueryClient creates a Query Service client from the loaded config.
+// Returns nil client (no error) when neither QUERY_SERVICE_URL nor LFX_BASE_URL is set.
+func newQueryClient(ctx context.Context) (*query.Client, error) {
+	if appConfig.QueryServiceURL != "" {
+		// Direct access — no auth needed.
+		slog.InfoContext(ctx, "using direct Query Service URL", "url", appConfig.QueryServiceURL)
+		return query.NewClient(query.ClientConfig{
+			BaseURL: appConfig.QueryServiceURL,
+		}), nil
+	}
+
+	if appConfig.LFXBaseURL != "" && appConfig.LFXAudience != "" {
+		// LFX API gateway — needs Auth0 bearer token.
+		if appConfig.Auth0IssuerBaseURL == "" || appConfig.Auth0ClientID == "" || appConfig.Auth0M2MPrivateBase64Key == "" {
+			return nil, fmt.Errorf("LFX_BASE_URL set but Auth0 credentials missing (need AUTH0_ISSUER_BASE_URL, AUTH0_CLIENT_ID, AUTH0_M2M_PRIVATE_BASE64_KEY)")
+		}
+
+		tokenProv, err := cdp.NewTokenProvider(cdp.TokenProviderConfig{
+			IssuerBaseURL:    appConfig.Auth0IssuerBaseURL,
+			ClientID:         appConfig.Auth0ClientID,
+			Audience:         appConfig.LFXAudience,
+			Scopes:           "access:api",
+			PrivateKeyBase64: appConfig.Auth0M2MPrivateBase64Key,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("create LFX token provider: %w", err)
+		}
+
+		slog.InfoContext(ctx, "using LFX API gateway for Query Service", "url", appConfig.LFXBaseURL)
+		return query.NewClient(query.ClientConfig{
+			BaseURL:   appConfig.LFXBaseURL,
+			TokenFunc: tokenProv.Token,
+		}), nil
+	}
+
+	// Neither configured.
+	return nil, nil
 }
 
 // getNATSClient returns the initialized NATS client.

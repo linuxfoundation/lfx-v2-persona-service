@@ -53,10 +53,3 @@ type ProjectAffiliationEntry struct {
 	EndDate          *string `json:"endDate"`
 	Type             string  `json:"type"`
 }
-
-// TokenResponse is the Auth0 /oauth/token response.
-type TokenResponse struct {
-	AccessToken string `json:"access_token"`
-	ExpiresIn   int    `json:"expires_in"`
-	TokenType   string `json:"token_type"`
-}

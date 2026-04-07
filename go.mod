@@ -3,7 +3,7 @@
 
 module github.com/linuxfoundation/lfx-v2-persona-service
 
-go 1.24.5
+go 1.25.0
 
 require (
 	github.com/golang-jwt/jwt/v5 v5.3.0
@@ -25,6 +25,7 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.40.0
 	goa.design/clue v1.2.3
 	goa.design/goa/v3 v3.23.3
+	golang.org/x/oauth2 v0.36.0
 )
 
 require (

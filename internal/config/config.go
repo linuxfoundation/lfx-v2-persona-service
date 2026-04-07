@@ -15,6 +15,10 @@ type Config struct {
 	NATSURL         string
 	QueryServiceURL string
 
+	// LFX API gateway (used when QUERY_SERVICE_URL is not set).
+	LFXBaseURL  string
+	LFXAudience string
+
 	CDPEnabled       bool
 	SnowflakeEnabled bool
 
@@ -41,6 +45,12 @@ func Load() Config {
 	cfg := Config{
 		NATSURL:         envOrDefault(constants.NATSURLEnvKey, "nats://localhost:4222"),
 		QueryServiceURL: os.Getenv(constants.QueryServiceURLEnvKey),
+		LFXBaseURL:      os.Getenv(constants.LFXBaseURLEnvKey),
+		LFXAudience:     os.Getenv(constants.LFXAudienceEnvKey),
+	}
+
+	if cfg.QueryServiceURL == "" && cfg.LFXBaseURL == "" {
+		slog.Warn("neither QUERY_SERVICE_URL nor LFX_BASE_URL is set — Query Service sources will be disabled")
 	}
 
 	// CDP credential group — all five must be present to enable.

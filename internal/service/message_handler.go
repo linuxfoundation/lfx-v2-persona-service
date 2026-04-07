@@ -8,16 +8,21 @@ import (
 	"encoding/json"
 	"log/slog"
 	"strings"
+	"sync"
 
 	"github.com/linuxfoundation/lfx-v2-persona-service/internal/domain/model"
 	"github.com/linuxfoundation/lfx-v2-persona-service/internal/domain/port"
 	"github.com/linuxfoundation/lfx-v2-persona-service/internal/infrastructure/cdp"
+	natsclient "github.com/linuxfoundation/lfx-v2-persona-service/internal/infrastructure/nats"
+	"github.com/linuxfoundation/lfx-v2-persona-service/internal/infrastructure/query"
 )
 
 // personaHandler implements port.MessageHandler.
 type personaHandler struct {
-	cdpClient *cdp.Client
-	cdpCache  *cdp.Cache
+	cdpClient   *cdp.Client
+	cdpCache    *cdp.Cache
+	queryClient *query.Client
+	natsClient  *natsclient.NATSClient
 }
 
 // PersonaHandlerOption configures the personaHandler.
@@ -28,6 +33,14 @@ func WithCDP(client *cdp.Client, cache *cdp.Cache) PersonaHandlerOption {
 	return func(h *personaHandler) {
 		h.cdpClient = client
 		h.cdpCache = cache
+	}
+}
+
+// WithQueryService enables Query Service-based sources (Board Member, Source 4, etc.).
+func WithQueryService(client *query.Client, nc *natsclient.NATSClient) PersonaHandlerOption {
+	return func(h *personaHandler) {
+		h.queryClient = client
+		h.natsClient = nc
 	}
 }
 
@@ -52,19 +65,52 @@ func (h *personaHandler) GetPersona(ctx context.Context, msg port.TransportMesse
 		"email", req.Email,
 	)
 
-	var projects []model.Project
+	// Fan out to enabled sources in parallel.
+	type sourceResult struct {
+		projects []model.Project
+		err      error
+		name     string
+	}
+
+	var wg sync.WaitGroup
+	results := make(chan sourceResult, 4)
+
+	// Board Member + Source 4 (committee membership).
+	if h.queryClient != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			p, err := h.sourceBoardMemberAndCommittee(ctx, &req)
+			results <- sourceResult{p, err, "board_member+committee"}
+		}()
+	}
 
 	// Source 2: CDP roles and affiliations.
 	if h.cdpClient != nil {
-		cdpProjects, err := h.sourceCDPRoles(ctx, &req)
-		if err != nil {
-			// Partial failure — log and continue with other sources.
-			slog.ErrorContext(ctx, "CDP source failed, skipping",
-				"error", err,
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			p, err := h.sourceCDPRoles(ctx, &req)
+			results <- sourceResult{p, err, "cdp_roles"}
+		}()
+	}
+
+	// Close results channel when all sources finish.
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	var projects []model.Project
+	for r := range results {
+		if r.err != nil {
+			slog.ErrorContext(ctx, "source failed, skipping",
+				"source", r.name,
+				"error", r.err,
 			)
-		} else {
-			projects = model.MergeProjects(projects, cdpProjects)
+			continue
 		}
+		projects = model.MergeProjects(projects, r.projects)
 	}
 
 	resp := model.PersonaResponse{

@@ -49,6 +49,23 @@ const (
 	SourceMeetingAttendance = "meeting_attendance"
 )
 
+// BoardMemberExtra is the extra payload for a board_member detection.
+type BoardMemberExtra struct {
+	CommitteeUID       string `json:"committee_uid"`
+	CommitteeName      string `json:"committee_name"`
+	CommitteeMemberUID string `json:"committee_member_uid"`
+	Role               string `json:"role"`
+	VotingStatus       string `json:"voting_status"`
+}
+
+// CommitteeMemberExtra is the extra payload for a committee_member detection (Source 4).
+type CommitteeMemberExtra struct {
+	CommitteeUID       string `json:"committee_uid"`
+	CommitteeName      string `json:"committee_name"`
+	CommitteeMemberUID string `json:"committee_member_uid"`
+	Role               string `json:"role"`
+}
+
 // CDPRolesExtra is the extra payload for a cdp_roles detection.
 // Roles are passed through as-is from CDP; the UI interprets them.
 type CDPRolesExtra struct {
