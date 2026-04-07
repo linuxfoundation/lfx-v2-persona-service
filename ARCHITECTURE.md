@@ -176,62 +176,6 @@ As an alternative to the v1 Sync Helper pattern, the ED could be populated by
 polling the v1 Project Service API directly and writing results into the
 job-results DB. No implementation guidance is provided for this path.
 
-### Maintainer
-
-Determined by CDP project-affiliation role data. A user is a Maintainer for a
-given project if any entry in their `roles[]` array from the CDP
-`/api/v1/members/{memberId}/project-affiliations` endpoint has a non-empty
-`role` value (i.e. any explicitly assigned role, not merely activity).
-
-#### CDP lookup flow
-
-The Persona Service reuses the same two-step flow already implemented in the
-LFX SSR app (`cdp.service.ts`), ported to Go:
-
-1. **Resolve** — `POST /api/v1/members/resolve` with `{ lfids: [username],
-   emails: [email] }` to obtain the CDP `memberId`. A 404 means CDP has no
-   profile for this user; stop and return no Maintainer personas.
-
-2. **Fetch affiliations** — `GET /api/v1/members/{memberId}/project-affiliations`
-   to obtain the full list of project affiliations with roles and activity.
-
-These two steps are shared with the Contributor persona (see below) and must
-be executed once per request, with results fanned out to both.
-
-#### Authentication
-
-CDP uses Auth0 client credentials with a CDP-specific audience, identical to
-the SSR app pattern:
-
-- **Token endpoint**: `${AUTH0_ISSUER_BASE_URL}/oauth/token`
-- **Credentials**: Auth0 client credentials for the **"LFX One"** application
-  (`AUTH0_CLIENT_ID` / `AUTH0_CLIENT_SECRET`), which already holds the
-  `read:project-affiliations` and `read:maintainer-roles` grants against the
-  CDP audience (see `grants_cdp.tf`). For initial implementation, sharing
-  these credentials with the SSR app is acceptable; a dedicated Persona
-  Service M2M client can be split out later.
-- **Audience**: `CDP_AUDIENCE`
-- **Token cache**: in-process, with a 5-minute buffer before expiry (same
-  as the SSR app).
-
-#### Caching
-
-The resolved `memberId` and the full affiliations response should be cached
-in-process with a simple TTL (suggested: 5 minutes). This avoids redundant
-CDP round-trips within a single request and across rapid successive requests
-from the same user. A more durable cache (e.g. NATS KV) can be introduced
-later if CDP latency becomes a bottleneck.
-
-#### What is returned
-
-For each affiliation entry where `roles` is non-empty, return a stub:
-
-- `projectSlug` — for routing (note: this is a CDP slug; validate against
-  v2 slug during development).
-- `projectName` and `projectLogo` — for display.
-- `roles[].role` — the role string(s) as returned by CDP, passed through
-  to the UI without interpretation.
-
 ### Contributor
 
 The "default view." The Contributor persona represents any project engagement
@@ -246,12 +190,42 @@ All four sources converge on the same output unit: a list of
 source). The Persona Service unions these lists, de-duplicates by
 `project_uid`, and returns the merged set.
 
+#### CDP lookup flow (shared by sources 1 and 2)
+
+The Persona Service reuses the same two-step flow already implemented in the
+LFX SSR app (`cdp.service.ts`), ported to Go:
+
+1. **Resolve** — `POST /api/v1/members/resolve` with `{ lfids: [username],
+   emails: [email] }` to obtain the CDP `memberId`. A 404 means CDP has no
+   profile for this user; sources 1 and 2 yield empty lists (sources 3 and
+   4 are unaffected).
+
+2. **Fetch affiliations** — `GET /api/v1/members/{memberId}/project-affiliations`
+   to obtain the full list of project affiliations with roles and activity.
+
+**Authentication**: Auth0 client credentials with a CDP-specific audience:
+
+- **Token endpoint**: `${AUTH0_ISSUER_BASE_URL}/oauth/token`
+- **Credentials**: Auth0 client credentials for the **"LFX One"** application
+  (`AUTH0_CLIENT_ID` / `AUTH0_CLIENT_SECRET`), which already holds the
+  `read:project-affiliations` and `read:maintainer-roles` grants against the
+  CDP audience (see `grants_cdp.tf`). For initial implementation, sharing
+  these credentials with the SSR app is acceptable; a dedicated Persona
+  Service M2M client can be split out later.
+- **Audience**: `CDP_AUDIENCE`
+- **Token cache**: in-process, with a 5-minute buffer before expiry.
+
+**Caching**: The resolved `memberId` and the full affiliations response should
+be cached in-process with a simple TTL (suggested: 5 minutes). A more durable
+cache (e.g. NATS KV) can be introduced later if CDP latency becomes a
+bottleneck.
+
 #### Source 1: CDP activity (Snowflake)
 
-In parallel with the CDP affiliations call (step 2a above), use the CDP
-`memberId` from the resolve step to query Snowflake for a list of projects
-the user has any recorded activity in (step 2b). This uses fast/approximate
-aggregation functions only — no per-contribution detail.
+In parallel with the CDP affiliations call, use the CDP `memberId` from the
+resolve step to query Snowflake for a list of projects the user has any
+recorded activity in. This uses fast/approximate aggregation functions only —
+no per-contribution detail.
 
 **Snowflake auth**: RSA private key JWT, identical to the SSR app pattern:
 
@@ -264,20 +238,53 @@ aggregation functions only — no per-contribution detail.
 The specific Snowflake query (table/column names, schema) must be validated
 during development against the CDP Snowflake schema.
 
-#### Source 2: CDP roles (from affiliations response)
+#### Source 2: CDP roles and affiliations
 
-From the same `/project-affiliations` response used for Maintainer (no
-additional call needed), collect all `projectSlug` values regardless of
-whether `roles` is populated — any affiliation entry indicates project
-involvement.
+From the `/project-affiliations` response, collect all entries. Each entry
+contributes a `{ projectSlug, projectName, projectLogo }` tuple to the
+Contributor project list. Entries where `roles[]` is non-empty additionally
+carry the role detail (`roles[].role`) as supplementary context for the UI
+— the UI may choose to surface these as a "Maintainer" label or similar, but
+the Persona Service does not treat them as a distinct persona type.
 
-#### Source 3: Access control membership
+#### Source 3: Access control membership (writers and auditors)
 
-Any project for which the user holds a `writer` or `auditor` OpenFGA
-relationship indicates contributor-level involvement. **TBD:** determine
-whether this is best queried via a Query Service call (e.g.
-`type=project&filters=writers:<username>`) or via a direct OpenFGA list
-operation.
+Any project for which the user holds a `writer` or `auditor` relationship
+is identified via a Query Service term filter against `data.writers` and
+`data.auditors`, which are present on the indexed project document today:
+
+```
+type=project
+filters=writers:<username>
+```
+
+and in parallel:
+
+```
+type=project
+filters=auditors:<username>
+```
+
+Results from both legs are de-duplicated by `Resource.id` before merging.
+A local exact post-filter must be applied for the same reason as other
+`filters`-based lookups — the term clause may be overly liberal.
+
+#### Source 3 future extension: Project contacts index
+
+The longer-term approach is to query via the `contacts` nested field on
+the indexed project document, which would also cover ED and PMO contacts.
+`contacts` is a first-class `nested` field in the OpenSearch mapping
+(separate from `data`) and carries `lfx_principal`, `name`, `emails`, and
+`profile` per entry. This depends on two non-trivial pieces of work:
+
+1. **Project Service** — needs to be updated to populate the `contacts`
+   array in its indexer messages (writers, auditors, ED, PMO). ED and PMO
+   fields only become available after the v1 Sync Helper work lands them
+   on the project model (see Executive Director section).
+
+2. **New Query Service endpoint** — the existing resource search API
+   cannot query `nested` fields; a dedicated contacts search endpoint is
+   required. This is a net-new capability, not a parameter addition.
 
 #### Source 4: Committee membership
 
