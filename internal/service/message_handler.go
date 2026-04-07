@@ -171,11 +171,72 @@ func (h *personaHandler) sourceCDPRoles(ctx context.Context, req *model.PersonaR
 		go h.backgroundRefreshAffiliations(memberID)
 	}
 
-	// Step 3: Convert affiliations to detections.
-	return affiliationsToProjects(affiliations)
+	// Step 3: Resolve CDP slugs → v2 project UIDs, then convert to detections.
+	slugMap := h.resolveSlugsToUIDs(ctx, affiliations)
+	return affiliationsToProjects(affiliations, slugMap)
 }
 
-func affiliationsToProjects(affiliations []cdp.ProjectAffiliation) ([]model.Project, error) {
+const projectServiceSlugToUID = "lfx.project-service.slug_to_uid"
+
+// resolveSlugsToUIDs resolves CDP project slugs to v2 project UIDs in parallel
+// via the project service NATS endpoint. Returns a map of slug → v2 UID.
+func (h *personaHandler) resolveSlugsToUIDs(ctx context.Context, affiliations []cdp.ProjectAffiliation) map[string]string {
+	if h.natsClient == nil {
+		return nil
+	}
+
+	// Collect unique slugs, skipping CDP-only "nonlf_" projects.
+	unique := make(map[string]bool)
+	for _, aff := range affiliations {
+		if aff.ProjectSlug != "" && !strings.HasPrefix(aff.ProjectSlug, "nonlf_") {
+			unique[aff.ProjectSlug] = true
+		}
+	}
+
+	if len(unique) == 0 {
+		return nil
+	}
+
+	type result struct {
+		slug string
+		uid  string
+	}
+
+	var wg sync.WaitGroup
+	ch := make(chan result, len(unique))
+
+	for slug := range unique {
+		wg.Add(1)
+		go func(s string) {
+			defer wg.Done()
+			resp, err := h.natsClient.Request(ctx, projectServiceSlugToUID, []byte(s))
+			if err != nil {
+				slog.WarnContext(ctx, "slug→uid resolution failed", "slug", s, "error", err)
+				return
+			}
+			uid := strings.TrimSpace(string(resp))
+			if uid == "" || (len(resp) > 0 && resp[0] == '{') {
+				slog.WarnContext(ctx, "slug→uid returned empty or error", "slug", s, "response", string(resp))
+				return
+			}
+			ch <- result{slug: s, uid: uid}
+		}(slug)
+	}
+
+	wg.Wait()
+	close(ch)
+
+	out := make(map[string]string, len(unique))
+	for r := range ch {
+		out[r.slug] = r.uid
+	}
+
+	slog.DebugContext(ctx, "resolved CDP slugs to v2 UIDs", "requested", len(unique), "resolved", len(out))
+
+	return out
+}
+
+func affiliationsToProjects(affiliations []cdp.ProjectAffiliation, slugMap map[string]string) ([]model.Project, error) {
 	projects := make([]model.Project, 0, len(affiliations))
 
 	for _, aff := range affiliations {
@@ -200,8 +261,17 @@ func affiliationsToProjects(affiliations []cdp.ProjectAffiliation) ([]model.Proj
 			return nil, err
 		}
 
+		// Skip nonlf_ slugs and entries that failed v2 UID resolution.
+		if strings.HasPrefix(aff.ProjectSlug, "nonlf_") {
+			continue
+		}
+		projectUID, ok := slugMap[aff.ProjectSlug]
+		if !ok || projectUID == "" {
+			continue
+		}
+
 		projects = append(projects, model.Project{
-			ProjectUID:  aff.ID,
+			ProjectUID:  projectUID,
 			ProjectSlug: aff.ProjectSlug,
 			Detections: []model.Detection{
 				{
