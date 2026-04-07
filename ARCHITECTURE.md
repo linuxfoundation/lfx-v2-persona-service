@@ -84,8 +84,11 @@ result the Persona Service extracts and returns a stub containing:
 - `data.project_uid` and `data.project_slug` (from the committee's tags,
   denormalised onto the member at index time) — for project-scoped routing.
 - `id` (the committee member UUID) — for deep-linking.
-- `data.role.name` and `data.voting.status` — informational; the UI decides
-  how to present or gate based on these values.
+- `data.role.name` and `data.voting.status` — the "group role" within the
+  board (e.g. Chair, Observer, Voting Rep, None); the UI decides how to
+  present or gate based on these values. The full set of valid role and voting
+  status values is defined by the Committee Service enum and carried
+  as-is; the Persona Service does not filter or interpret them.
 
 The Persona Service does **not** make access-control decisions based on role
 or voting status; it surfaces the data and defers gating entirely to the UI.
@@ -175,24 +178,120 @@ job-results DB. No implementation guidance is provided for this path.
 
 ### Maintainer
 
-Determined by CDP data.
+Determined by CDP project-affiliation role data. A user is a Maintainer for a
+given project if any entry in their `roles[]` array from the CDP
+`/api/v1/members/{memberId}/project-affiliations` endpoint has a non-empty
+`role` value (i.e. any explicitly assigned role, not merely activity).
 
-**TBD:** Evaluate reuse of the same API used for the affiliations screens.
-Consider introducing a caching layer in front of the CDP call.
+#### CDP lookup flow
+
+The Persona Service reuses the same two-step flow already implemented in the
+LFX SSR app (`cdp.service.ts`), ported to Go:
+
+1. **Resolve** — `POST /api/v1/members/resolve` with `{ lfids: [username],
+   emails: [email] }` to obtain the CDP `memberId`. A 404 means CDP has no
+   profile for this user; stop and return no Maintainer personas.
+
+2. **Fetch affiliations** — `GET /api/v1/members/{memberId}/project-affiliations`
+   to obtain the full list of project affiliations with roles and activity.
+
+These two steps are shared with the Contributor persona (see below) and must
+be executed once per request, with results fanned out to both.
+
+#### Authentication
+
+CDP uses Auth0 client credentials with a CDP-specific audience, identical to
+the SSR app pattern:
+
+- **Token endpoint**: `${AUTH0_ISSUER_BASE_URL}/oauth/token`
+- **Credentials**: Auth0 client credentials for the **"LFX One"** application
+  (`AUTH0_CLIENT_ID` / `AUTH0_CLIENT_SECRET`), which already holds the
+  `read:project-affiliations` and `read:maintainer-roles` grants against the
+  CDP audience (see `grants_cdp.tf`). For initial implementation, sharing
+  these credentials with the SSR app is acceptable; a dedicated Persona
+  Service M2M client can be split out later.
+- **Audience**: `CDP_AUDIENCE`
+- **Token cache**: in-process, with a 5-minute buffer before expiry (same
+  as the SSR app).
+
+#### Caching
+
+The resolved `memberId` and the full affiliations response should be cached
+in-process with a simple TTL (suggested: 5 minutes). This avoids redundant
+CDP round-trips within a single request and across rapid successive requests
+from the same user. A more durable cache (e.g. NATS KV) can be introduced
+later if CDP latency becomes a bottleneck.
+
+#### What is returned
+
+For each affiliation entry where `roles` is non-empty, return a stub:
+
+- `projectSlug` — for routing (note: this is a CDP slug; validate against
+  v2 slug during development).
+- `projectName` and `projectLogo` — for display.
+- `roles[].role` — the role string(s) as returned by CDP, passed through
+  to the UI without interpretation.
 
 ### Contributor
 
-The "default view." Also filtered by projects the user actually has some
-involvement in. It is intentionally out of scope for this service to define
-whether contributor status is a hard gate or a "promoted / recommended"
-navigation hint — this service is not access control.
+The "default view." The Contributor persona represents any project engagement
+the user has, drawn from four sources unioned together. It is intentionally
+out of scope for this service to define whether contributor status is a hard
+gate or a softer navigation hint — this service is not access control.
 
-Sources that may indicate contributor status:
+#### Output shape
 
-- CDP (maintainer, contributor, or any activity)
-- Access control membership (writer/auditor)
-- Committee membership
-- ITX activity (meetings, mailing lists)
+All four sources converge on the same output unit: a list of
+`{ project_uid, project_slug }` tuples (with optional extra context per
+source). The Persona Service unions these lists, de-duplicates by
+`project_uid`, and returns the merged set.
+
+#### Source 1: CDP activity (Snowflake)
+
+In parallel with the CDP affiliations call (step 2a above), use the CDP
+`memberId` from the resolve step to query Snowflake for a list of projects
+the user has any recorded activity in (step 2b). This uses fast/approximate
+aggregation functions only — no per-contribution detail.
+
+**Snowflake auth**: RSA private key JWT, identical to the SSR app pattern:
+
+- **Credentials**: `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_ROLE`,
+  `SNOWFLAKE_DATABASE`, `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_API_KEY` (PEM
+  private key).
+- For initial implementation, credential reuse from the UI is acceptable;
+  can be split out later.
+
+The specific Snowflake query (table/column names, schema) must be validated
+during development against the CDP Snowflake schema.
+
+#### Source 2: CDP roles (from affiliations response)
+
+From the same `/project-affiliations` response used for Maintainer (no
+additional call needed), collect all `projectSlug` values regardless of
+whether `roles` is populated — any affiliation entry indicates project
+involvement.
+
+#### Source 3: Access control membership
+
+Any project for which the user holds a `writer` or `auditor` OpenFGA
+relationship indicates contributor-level involvement. **TBD:** determine
+whether this is best queried via a Query Service call (e.g.
+`type=project&filters=writers:<username>`) or via a direct OpenFGA list
+operation.
+
+#### Source 4: Committee membership
+
+Any project reachable via the user's committee memberships (Board or
+otherwise) implies contributor status. This data is already obtained as
+a by-product of the Board Member persona query; the `project_uid` and
+`project_slug` values from those results can be folded in directly without
+an additional call.
+
+#### CDP flow dependency
+
+Sources 1 and 2 both depend on the CDP resolve step. If CDP returns 404
+(no profile), both sources yield empty lists; sources 3 and 4 are
+unaffected.
 
 ## Data flow
 
