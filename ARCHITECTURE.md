@@ -159,7 +159,7 @@ One entry per unique `project_uid`. A project that matches via multiple sources 
 
 The UI is responsible for interpreting `roles[]` (e.g. surfacing a "Maintainer" label). The Persona Service passes role data through without filtering or interpretation.
 
-`cdp_roles` is only emitted when the CDP `/project-affiliations` response includes an entry for this project. `contributionCount` is sourced from the Snowflake query (Source 1) and merged in at response-assembly time; if the Snowflake query is skipped or returns no data for this project it is omitted from `extra`.
+`cdp_roles` is only emitted when the CDP `/project-affiliations` response includes an entry for this project. Both `contributionCount` and `roles[]` come directly from that response.
 
 **Note:** `cdp_activity` (Source 1) is retained as a separate token for projects where Snowflake records activity but CDP has no affiliation entry. During implementation, if `contributionCount` on `cdp_roles` proves sufficient to cover the Source 1 signal, `cdp_activity` may be dropped.
 
@@ -362,10 +362,7 @@ LFX SSR app (`cdp.service.ts`), ported to Go:
 - **Audience**: `CDP_AUDIENCE`
 - **Token cache**: in-process, with a 5-minute buffer before expiry.
 
-**Caching**: The resolved `memberId` and the full affiliations response should
-be cached in-process with a simple TTL (suggested: 5 minutes). A more durable
-cache (e.g. NATS KV) can be introduced later if CDP latency becomes a
-bottleneck.
+**Caching**: The resolved `memberId` and the full affiliations response are cached in a NATS KV bucket (see Caching section). Auth0 tokens are cached in-process only, with a 5-minute buffer before expiry.
 
 #### Source 1: CDP activity (Snowflake)
 
@@ -443,31 +440,52 @@ an additional call.
 #### Source 5: Mailing list subscriptions
 
 Any project whose mailing lists the user subscribes to implies engagement.
-Mailing list membership records are indexed as a `mailing_list_member`
-(or equivalent) resource type. The Persona Service issues two queries in
-parallel against the Query Service and de-duplicates by `Resource.id`,
-following the same dual-leg pattern as Board Member.
+Mailing list membership records are indexed as `groupsio_member` resources.
+The Persona Service issues two queries in parallel against the Query Service
+and de-duplicates by `Resource.id`, following the same dual-leg pattern as
+Board Member.
 
-Identity matching applies the same email-primary / username-secondary
-strategy as Board Member:
+Identity matching uses the confirmed field names from the indexed schema:
 
-1. **Email leg** — filter `object_type:mailing_list_member` +
-   `email:<user-email>` (tag term lookup).
+1. **Email leg** — filter `object_type:groupsio_member` +
+   `email:<user-email>` (tag term lookup; `email:<value>` tag confirmed present).
 2. **Username leg** (skipped when username is empty) — filter
-   `object_type:mailing_list_member` + `filters=username:<username>`.
+   `object_type:groupsio_member` + `filters=username:<username>`.
+   Note: `data.username` is present on the record but is not reliably
+   populated (observed empty string in production records) — the email
+   leg is the primary signal.
 
 A local exact post-filter is required on the username leg results for the
 same reason as all other `filters`-based lookups.
 
-**TBD — schema validation required before implementation:**
+**Project resolution:** The `groupsio_member` record does not carry
+`project_uid` or `project_slug` directly. The record's `parent_refs`
+contains `mailing_list:<id>` and `data.mailing_list_uid` identifies the
+parent mailing list, but the project relationship is one level further up.
+**Project resolution (unresolved — decision required):** The
+`groupsio_member` indexed record does not carry `project_uid` or
+`project_slug`. The record identifies its parent mailing list via
+`data.mailing_list_uid` and `parent_refs`, but the project relationship
+is one level further up and is not propagated at index time. Three
+approaches are available; one must be chosen before implementation:
 
-- Confirm the indexed resource type name (e.g. `mailing_list_member`,
-  `list_member`).
-- Confirm `email` is an indexed tag (not only a `data.*` field).
-- Confirm `data.username` (or equivalent) field name and whether it is
-  reliably populated.
-- Confirm which `data.*` fields carry `project_uid` and `project_slug`
-  (or their equivalents) for the projects[] union output.
+1. **Update indexing enrichment** — extend the `groupsio_member`
+   `indexing_config` to propagate `project_uid`/`project_slug` from
+   the parent mailing list at index time. Cleanest runtime path; requires
+   an indexer change and re-index of existing records.
+
+2. **Per-record resource fetch** — after querying for matching member
+   records, fetch each referenced mailing list record individually (in
+   parallel with a concurrency limit) to extract the project. Aggressive
+   TTL caching acceptable. Not ideal: mailing list records are
+   ITX-backed (Groups.io), so cache misses may incur a vendor roundtrip.
+
+3. **Replace with a Snowflake query** — skip the Query Service entirely
+   for this source and query Snowflake directly for mailing list
+   memberships by user. Shares the Snowflake infrastructure already
+   required for Source 1. Eliminates the project resolution problem if
+   the Snowflake schema carries project context alongside membership.
+   Requires Snowflake schema validation.
 
 #### What is returned (Source 5)
 
@@ -481,28 +499,49 @@ permission signal; it is a navigation hint only.
 
 #### Source 6: Meeting attendance
 
-Any project whose meetings the user has attended (or is registered for)
-implies engagement. Meeting attendance records are indexed as an
-`event_attendee` (or equivalent) resource type. The Persona Service uses
-the same dual-leg, email-primary / username-secondary strategy:
+Any project whose meetings the user has attended (or been invited to)
+implies engagement. Past meeting participant records are indexed as
+`v1_past_meeting_participant` resources (invitees and attendees are stored
+together; `data.is_attended` and `data.is_invited` distinguish them).
 
-1. **Email leg** — filter `object_type:event_attendee` +
-   `email:<user-email>` (tag term lookup).
-2. **Username leg** (skipped when username is empty) — filter
-   `object_type:event_attendee` + `filters=username:<username>`.
+Both `email` and `username` are indexed as tags on `v1_past_meeting_participant`
+records, so both legs use tag lookups — no `filters` clause is needed and
+the liberal-match concern does not apply:
 
-A local exact post-filter is required on the username leg results.
+1. **Email leg** — `tags_all=email:<user-email>` with
+   `object_type:v1_past_meeting_participant`.
+2. **Username leg** (skipped when username is empty) —
+   `tags_all=username:<username>` with
+   `object_type:v1_past_meeting_participant`.
+   Note: `username` on these records is populated as an Auth0 subject
+   (`auth0|<nickname>`), not a bare LFX username. The request's
+   `username` field must be matched accordingly; confirm the exact
+   format expected during implementation.
 
-**TBD — schema validation required before implementation:**
+Results from both legs are de-duplicated by `Resource.id`.
 
-- Confirm the indexed resource type name (e.g. `event_attendee`,
-  `meeting_attendee`, `attendee`).
-- Confirm `email` is an indexed tag.
-- Confirm `data.username` (or equivalent) field name and reliability.
-- Confirm which `data.*` fields carry `project_uid` and `project_slug`.
-- Confirm whether attendance records cover both past attendance and future
-  registrations, or only one; clarify whether both should contribute to
-  the projects[] union output.
+**Scope:** Both `is_attended` and `is_invited` records are included —
+the intent is engagement signal, not proof of attendance. The Persona
+Service does not filter by attendance status.
+
+**Project resolution (unresolved — decision required):** The
+`v1_past_meeting_participant` indexed record does not carry `project_uid`
+or `project_slug`. `parent_refs` identifies the parent `meeting` and
+`past_meeting` records, but the project relationship is not propagated
+at index time. The same three options apply as for Source 5:
+
+1. **Update indexing enrichment** — propagate `project_uid`/`project_slug`
+   from the parent meeting onto participant records at index time.
+   Cleanest runtime path; requires indexer change and re-index.
+
+2. **Per-record resource fetch** — fetch each referenced meeting record
+   individually (parallel, TTL-cached) to extract the project. Not ideal:
+   meeting records are ITX-backed (Zoom), so cache misses may incur a
+   vendor roundtrip.
+
+3. **Replace with a Snowflake query** — query Snowflake directly for
+   meeting attendance by user, bypassing the Query Service. Requires
+   Snowflake schema validation.
 
 #### What is returned (Source 6)
 
@@ -517,18 +556,62 @@ Sources 1 and 2 both depend on the CDP resolve step. If CDP returns 404
 (no profile), both sources yield empty lists; sources 3 through 6 are
 unaffected.
 
+## Caching
+
+The Persona Service caches the results of slow or rate-limited upstream
+calls. **Query Service legs are not cached** — they are fast, indexed
+lookups that can be issued on every request without concern.
+
+### What is cached
+
+| Data | Backend | TTL |
+|------|---------|-----|
+| CDP `memberId` (from `/resolve`) | NATS KV | 24 hours |
+| CDP affiliations (from `/project-affiliations`) | NATS KV | 24 hours |
+| Snowflake project activity list | NATS KV | 24 hours |
+| Auth0 M2M access token | In-process only | Expiry − 5 min |
+
+### NATS KV bucket
+
+Bucket name: `persona-cache`
+
+Cache keys are scoped per user. Suggested key scheme:
+
+- `cdp.member_id.<username>` — resolved CDP `memberId`
+- `cdp.affiliations.<member_id>` — full `/project-affiliations` response
+- `snowflake.activity.<member_id>` — Snowflake project list
+
+### TTL and stale-while-revalidate strategy
+
+All NATS KV entries use a 24-hour TTL. On a cache hit, the age of the
+entry determines the handling:
+
+| Age | Behaviour |
+|-----|-----------|
+| < 10 minutes | Return cached value as-is. No background update. |
+| ≥ 10 minutes and < 24 hours | Return cached value immediately (stale-while-revalidate). Trigger a background refresh to update the entry. |
+| ≥ 24 hours (expired / missing) | Cache miss — fetch fresh data synchronously, populate cache, return result. |
+
+The 10-minute threshold is the point at which a background refresh is
+worth the cost. Below it, the data is fresh enough that the overhead is
+not justified. The intent is that most requests hit the < 10 minute
+branch during active UI sessions, and the background refresh keeps the
+cache warm for the next session without blocking the response.
+
 ## Data flow
 
 ```mermaid
 graph LR
-  UI_SSR["UI SSR"] -->|NATS| PS["Persona Service"]
+  UI["UI SSR"] -->|"NATS RPC\nlfx.personas-api.get"| PS["Persona Service"]
 
-  PS -->|"API call (local-ephemeral-cache-deferred)"| CDP
-  PS -->|Board group lookups| QS["Query Service"]
-  PS -->|"TBD: ED lookup, if implementing v1 sync into Project Service"| QS
+  PS -->|"Board/ED/writer/auditor/\ncommittee/mailing list/\nmeeting lookups\n(no cache)"| QS["Query Service"]
+  QS -->|results| PS
 
-  PS --> JR[("Persona Service\ndurable cache\njob-results DB")]
+  PS -->|"POST /resolve\nGET /project-affiliations\n(NATS KV cache)"| CDP
+  CDP -->|"memberId + affiliations\n(roles, contributionCount)"| PS
 
-  ITX -->|"Persona Service worker async polling"| JR
-  v1_DB["v1 DB"] -->|"TBD: async polling for v1 EDs\ninstead of implementing via realtime sync"| JR
+  PS -->|"Snowflake activity query\n(NATS KV cache)"| SF["Snowflake\n(via CDP)"]
+  SF -->|project list| PS
+
+  PS -->|"read/write\n(memberId, affiliations,\nSnowflake results)"| KV[("NATS KV\npersona-cache")]
 ```
