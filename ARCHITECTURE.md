@@ -117,13 +117,61 @@ for exact username equality before merging with the email leg results.
 
 ### Executive Director (ED)
 
-Determined by the ED field on the project object.
+Determined by a denormalized ED field on the v2 project object, carrying the
+ED's username, display name, and email — the same pattern used for `writers`
+and `auditors` on the project model.
 
-**TBD:** Add ED as a denormalized username/name/email field to the v2 project
-model (same pattern as writers/auditors), and decide between:
+#### Prerequisites (not yet implemented)
 
-- Bidirectional sync with v1, or
-- Same model as ITX.
+The ED field does not currently exist on the v2 project model. Before the
+Persona Service can serve this persona, two pieces of work are required:
+
+1. **v2 Project Service** — add an `executive_director` field (or equivalent)
+   to the project create/update API and the indexed project document, storing
+   at minimum `username`, `first_name`, `last_name`, and `email`.
+
+2. **v1 Sync Helper** — add ED sync as a new mapping in
+   `handlers_projects.go`. The v1 project record holds the ED as a Salesforce
+   contact SFID in the `executive_director__c` field. The
+   sync helper must dereference that SFID to a `V1User` via `lookupV1User`
+   (the same pattern already used for committee members in
+   `handlers_committees.go`), then write `username`, `first_name`,
+   `last_name`, and `email` into the v2 project payload. The `username` field
+   must be passed through `mapUsernameToAuthSub` before being stored, as is
+   done for all user references in the sync helper.
+
+3. **Re-index all v2 projects** — once the Project Service field and sync
+   helper mapping are in place, a full re-index of all project documents is
+   required so that existing projects carry the `executive_director` field in
+   OpenSearch and are queryable by the Persona Service.
+
+#### Detection strategy
+
+Once the field is present on the indexed project document, the Persona Service
+queries the Query Service for all projects where
+`data.executive_director.username` matches the requesting user's username:
+
+```
+type=project
+filters=executive_director.username:<username>
+```
+
+A local post-filter against exact username equality must be applied to the
+results for the same reason as the Board Member username leg — the `filters`
+term clause may be overly liberal.
+
+#### What is returned
+
+For each matching project the Persona Service returns a stub containing:
+
+- `data.uid` and `data.slug` — for project-scoped routing.
+- `data.name` — for display.
+
+#### Alternate approach
+
+As an alternative to the v1 Sync Helper pattern, the ED could be populated by
+polling the v1 Project Service API directly and writing results into the
+job-results DB. No implementation guidance is provided for this path.
 
 ### Maintainer
 
