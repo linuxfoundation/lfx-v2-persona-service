@@ -294,10 +294,82 @@ a by-product of the Board Member persona query; the `project_uid` and
 `project_slug` values from those results can be folded in directly without
 an additional call.
 
+#### Source 5: Mailing list subscriptions
+
+Any project whose mailing lists the user subscribes to implies engagement.
+Mailing list membership records are indexed as a `mailing_list_member`
+(or equivalent) resource type. The Persona Service issues two queries in
+parallel against the Query Service and de-duplicates by `Resource.id`,
+following the same dual-leg pattern as Board Member.
+
+Identity matching applies the same email-primary / username-secondary
+strategy as Board Member:
+
+1. **Email leg** — filter `object_type:mailing_list_member` +
+   `email:<user-email>` (tag term lookup).
+2. **Username leg** (skipped when username is empty) — filter
+   `object_type:mailing_list_member` + `filters=username:<username>`.
+
+A local exact post-filter is required on the username leg results for the
+same reason as all other `filters`-based lookups.
+
+**TBD — schema validation required before implementation:**
+
+- Confirm the indexed resource type name (e.g. `mailing_list_member`,
+  `list_member`).
+- Confirm `email` is an indexed tag (not only a `data.*` field).
+- Confirm `data.username` (or equivalent) field name and whether it is
+  reliably populated.
+- Confirm which `data.*` fields carry `project_uid` and `project_slug`
+  (or their equivalents) for the Contributor union output.
+
+#### What is returned (Source 5)
+
+For each de-duplicated mailing list membership, the Persona Service
+extracts a `{ project_uid, project_slug }` tuple for the Contributor
+output union. Additional stub fields (list name, subscription status)
+may be returned as supplementary context for the UI at the implementor's
+discretion.
+
+The Persona Service does **not** treat mailing list subscription as a
+permission signal; it is a navigation hint only.
+
+#### Source 6: Meeting attendance
+
+Any project whose meetings the user has attended (or is registered for)
+implies engagement. Meeting attendance records are indexed as an
+`event_attendee` (or equivalent) resource type. The Persona Service uses
+the same dual-leg, email-primary / username-secondary strategy:
+
+1. **Email leg** — filter `object_type:event_attendee` +
+   `email:<user-email>` (tag term lookup).
+2. **Username leg** (skipped when username is empty) — filter
+   `object_type:event_attendee` + `filters=username:<username>`.
+
+A local exact post-filter is required on the username leg results.
+
+**TBD — schema validation required before implementation:**
+
+- Confirm the indexed resource type name (e.g. `event_attendee`,
+  `meeting_attendee`, `attendee`).
+- Confirm `email` is an indexed tag.
+- Confirm `data.username` (or equivalent) field name and reliability.
+- Confirm which `data.*` fields carry `project_uid` and `project_slug`.
+- Confirm whether attendance records cover both past attendance and future
+  registrations, or only one; clarify whether both should contribute to
+  the Contributor project list.
+
+#### What is returned (Source 6)
+
+For each de-duplicated attendance record, the Persona Service extracts a
+`{ project_uid, project_slug }` tuple for the Contributor output union.
+Additional context (event name, event date) may be returned as
+supplementary context for the UI at the implementor's discretion.
+
 #### CDP flow dependency
 
 Sources 1 and 2 both depend on the CDP resolve step. If CDP returns 404
-(no profile), both sources yield empty lists; sources 3 and 4 are
+(no profile), both sources yield empty lists; sources 3 through 6 are
 unaffected.
 
 ## Data flow
