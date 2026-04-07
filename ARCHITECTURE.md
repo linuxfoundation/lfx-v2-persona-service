@@ -352,15 +352,16 @@ LFX SSR app (`cdp.service.ts`), ported to Go:
 2. **Fetch affiliations** — `GET /api/v1/members/{memberId}/project-affiliations`
    to obtain the full list of project affiliations with roles and activity.
 
-**Authentication**: Auth0 client credentials with a CDP-specific audience:
+**Authentication**: Auth0 private key JWT (client assertion) with a CDP-specific audience:
 
 - **Token endpoint**: `${AUTH0_ISSUER_BASE_URL}/oauth/token`
-- **Credentials**: Auth0 client credentials for the **"LFX One"** application
-  (`AUTH0_CLIENT_ID` / `AUTH0_CLIENT_SECRET`), which already holds the
+- **Credentials**: Auth0 M2M application **"LFX One"**
+  (`AUTH0_CLIENT_ID` / `AUTH0_M2M_PRIVATE_BASE64_KEY`), which already holds the
   `read:project-affiliations` and `read:maintainer-roles` grants against the
-  CDP audience (see `grants_cdp.tf`). For initial implementation, sharing
-  these credentials with the SSR app is acceptable; a dedicated Persona
-  Service M2M client can be split out later.
+  CDP audience (see `grants_cdp.tf`). The service signs a `client_assertion`
+  JWT with the private key instead of sending a client secret. For initial
+  implementation, sharing these credentials with the SSR app is acceptable;
+  a dedicated Persona Service M2M client can be split out later.
 - **Audience**: `CDP_AUDIENCE`
 - **Token cache**: in-process, with a 5-minute buffer before expiry.
 
@@ -605,7 +606,7 @@ All configuration is injected via environment variables. Variable names below fo
 | `NATS_URL` | yes | NATS server URL (e.g. `nats://nats:4222`). |
 | `AUTH0_ISSUER_BASE_URL` | CDP only | Auth0 tenant base URL; used to construct the `/oauth/token` endpoint for M2M token requests. |
 | `AUTH0_CLIENT_ID` | CDP only | Auth0 client ID for the LFX One M2M application. |
-| `AUTH0_CLIENT_SECRET` | CDP only | Corresponding client secret. |
+| `AUTH0_M2M_PRIVATE_BASE64_KEY` | CDP only | Base64-encoded RSA private key for signing client assertion JWTs (replaces client secret). |
 | `CDP_AUDIENCE` | CDP only | Auth0 audience string for the CDP API. |
 | `CDP_BASE_URL` | CDP only | Base URL for the CDP API (e.g. `https://api-gw.platform.linuxfoundation.org/cdp`). |
 | `SNOWFLAKE_ACCOUNT` | Snowflake only | Snowflake account identifier. |

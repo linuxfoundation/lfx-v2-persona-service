@@ -16,11 +16,11 @@ const (
 
 // Environment variable keys for CDP (optional group).
 const (
-	Auth0IssuerBaseURLEnvKey = "AUTH0_ISSUER_BASE_URL"
-	Auth0ClientIDEnvKey      = "AUTH0_CLIENT_ID"
-	Auth0ClientSecretEnvKey  = "AUTH0_CLIENT_SECRET"
-	CDPAudienceEnvKey        = "CDP_AUDIENCE"
-	CDPBaseURLEnvKey         = "CDP_BASE_URL"
+	Auth0IssuerBaseURLEnvKey       = "AUTH0_ISSUER_BASE_URL"
+	Auth0ClientIDEnvKey            = "AUTH0_CLIENT_ID"
+	Auth0M2MPrivateBase64KeyEnvKey = "AUTH0_M2M_PRIVATE_BASE64_KEY"
+	CDPAudienceEnvKey              = "CDP_AUDIENCE"
+	CDPBaseURLEnvKey               = "CDP_BASE_URL"
 )
 
 // Environment variable keys for Snowflake (optional group).

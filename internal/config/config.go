@@ -21,7 +21,7 @@ type Config struct {
 	// CDP credentials (populated only when CDPEnabled is true).
 	Auth0IssuerBaseURL string
 	Auth0ClientID      string
-	Auth0ClientSecret  string
+	Auth0M2MPrivateBase64Key  string
 	CDPAudience        string
 	CDPBaseURL         string
 
@@ -46,19 +46,19 @@ func Load() Config {
 	// CDP credential group — all five must be present to enable.
 	cfg.Auth0IssuerBaseURL = os.Getenv(constants.Auth0IssuerBaseURLEnvKey)
 	cfg.Auth0ClientID = os.Getenv(constants.Auth0ClientIDEnvKey)
-	cfg.Auth0ClientSecret = os.Getenv(constants.Auth0ClientSecretEnvKey)
+	cfg.Auth0M2MPrivateBase64Key = os.Getenv(constants.Auth0M2MPrivateBase64KeyEnvKey)
 	cfg.CDPAudience = os.Getenv(constants.CDPAudienceEnvKey)
 	cfg.CDPBaseURL = os.Getenv(constants.CDPBaseURLEnvKey)
 
 	cfg.CDPEnabled = cfg.Auth0IssuerBaseURL != "" &&
 		cfg.Auth0ClientID != "" &&
-		cfg.Auth0ClientSecret != "" &&
+		cfg.Auth0M2MPrivateBase64Key != "" &&
 		cfg.CDPAudience != "" &&
 		cfg.CDPBaseURL != ""
 
 	if !cfg.CDPEnabled {
 		slog.Warn("CDP credentials incomplete — sources cdp_activity and cdp_roles will be disabled",
-			"hint", "set AUTH0_ISSUER_BASE_URL, AUTH0_CLIENT_ID, AUTH0_CLIENT_SECRET, CDP_AUDIENCE, CDP_BASE_URL to enable",
+			"hint", "set AUTH0_ISSUER_BASE_URL, AUTH0_CLIENT_ID, AUTH0_M2M_PRIVATE_BASE64_KEY, CDP_AUDIENCE, CDP_BASE_URL to enable",
 		)
 	} else {
 		slog.Info("CDP capability enabled")
