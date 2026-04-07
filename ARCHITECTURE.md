@@ -25,6 +25,162 @@ than expose a stable business API, it is structured as a **NATS RPC endpoint**
 rather than a REST API following v2 idioms. Ownership sits with the UI team;
 this is not intended to become a "core service" (contrast: User Service `/me`).
 
+## Request / Response
+
+> **Design intent:** The contract below is intentionally agnostic and
+> flexible. It is designed to meet current known requirements while
+> leaving room for requirements to be refined without forcing premature
+> API churn. The trade-off is that the UI must do a small amount of
+> "promote out" work for nested data — for example, inspecting
+> `cdp_roles.extra.roles[]` to decide whether to surface a "Maintainer"
+> label, rather than receiving a pre-computed flag. As UI requirements
+> solidify, the contract can be revised to be more closely aligned to
+> UI consumption patterns.
+>
+> **The only expected consumer of this endpoint is the LFX UI.** This
+> is not a public or cross-team API. Changes to the contract should be
+> coordinated between the Persona Service and the UI; no other services
+> should depend on it.
+
+### NATS subject
+
+```
+lfx.personas-api.get
+```
+
+Queue group: `lfx.personas-api.queue`
+
+The caller issues a NATS request/reply on this subject and awaits a single reply on the auto-generated inbox. The service subscribes with a queue group so that multiple instances load-balance automatically.
+
+### Request
+
+```json
+{
+  "username": "jdoe",
+  "email": "jdoe@example.com"
+}
+```
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `username` | string | yes | Auth0 `nickname` / LFX username. May be empty string if not yet set on the account; sources that rely on username matching are skipped when empty. |
+| `email` | string | yes | Primary email address for the requesting user. Used as the primary identity signal for all email-leg queries. |
+
+### Response
+
+```json
+{
+  "projects": [
+    {
+      "project_uid": "...",
+      "project_slug": "my-project",
+      "detections": [
+        {
+          "source": "board_member",
+          "extra": {
+            "committee_uid": "...",
+            "committee_name": "TAC",
+            "committee_member_uid": "...",
+            "role": "Chair",
+            "voting_status": "Voting Rep"
+          }
+        },
+        {
+          "source": "cdp_roles",
+          "extra": {
+            "contributionCount": 42,
+            "roles": [
+              {
+                "id": "...",
+                "role": "Maintainer",
+                "startDate": "2024-01-01T00:00:00Z",
+                "endDate": null,
+                "repoUrl": "https://github.com/org/repo",
+                "repoFileUrl": "..."
+              }
+            ]
+          }
+        },
+        { "source": "mailing_list" }
+      ]
+    }
+  ],
+  "error": null
+}
+```
+
+`projects` is always present, and is empty (`[]`) when no matches are found across any source.
+
+#### `projects[]`
+
+One entry per unique `project_uid`. A project that matches via multiple sources is represented once, with one detection object per matching source.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `project_uid` | string | UUID of the project. |
+| `project_slug` | string | Slug — for UI routing. |
+| `detections` | object[] | One entry per source that matched. Never empty. |
+
+#### `detections[]`
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `source` | string | Token identifying the detection source (see table below). |
+| `extra` | object | Optional. Source-specific context. Omitted when the source has no supplementary data to provide. |
+
+**`source` token values:**
+
+| Token | Source | `extra` fields (when present) |
+|-------|--------|-------------------------------|
+| `board_member` | Board Member — committee query | `committee_uid`, `committee_name`, `committee_member_uid`, `role`, `voting_status` |
+| `executive_director` | Executive Director — project query | _(none)_ |
+| `cdp_activity` | Source 1 — Snowflake activity | _(none)_ |
+| `cdp_roles` | Source 2 — CDP affiliations | `contributionCount` (number), `roles[]` (passed through as-is from CDP; see shape below) |
+| `writer_auditor` | Source 3 — access control | _(none)_ |
+| `committee_member` | Source 4 — non-Board committee membership | `committee_uid`, `committee_name`, `committee_member_uid`, `role` |
+| `mailing_list` | Source 5 — mailing list subscriptions | _(none)_ |
+| `meeting_attendance` | Source 6 — meeting attendance | _(none)_ |
+
+**`cdp_roles` extra shape:**
+
+```typescript
+{
+  contributionCount: number;   // from Snowflake via Source 1
+  roles: {
+    id: string;
+    role: string;
+    startDate: string;         // ISO 8601 timestamp
+    endDate: string | null;
+    repoUrl: string;
+    repoFileUrl: string;
+  }[];
+}
+```
+
+The UI is responsible for interpreting `roles[]` (e.g. surfacing a "Maintainer" label). The Persona Service passes role data through without filtering or interpretation.
+
+`cdp_roles` is only emitted when the CDP `/project-affiliations` response includes an entry for this project. `contributionCount` is sourced from the Snowflake query (Source 1) and merged in at response-assembly time; if the Snowflake query is skipped or returns no data for this project it is omitted from `extra`.
+
+**Note:** `cdp_activity` (Source 1) is retained as a separate token for projects where Snowflake records activity but CDP has no affiliation entry. During implementation, if `contributionCount` on `cdp_roles` proves sufficient to cover the Source 1 signal, `cdp_activity` may be dropped.
+
+A single project entry may carry multiple detections with the same `source` token if the user matched via that source more than once (e.g. membership in two Board-category committees under the same project produces two `board_member` detection objects with different `extra` values).
+
+#### `error`
+
+`null` on success. On a hard failure (e.g. upstream NATS timeout, unrecoverable internal error) the response carries a non-null error object and `projects` is empty:
+
+```json
+{
+  "projects": [],
+  "error": {
+    "code": "upstream_timeout",
+    "message": "query service did not respond within deadline"
+  }
+}
+```
+
+Partial failures (e.g. CDP returning 404, one Query Service leg timing out) are treated as empty results for the affected source — they do not surface as top-level errors. The service returns whatever it was able to collect.
+
 ## Personas
 
 Personas are **not a singleton** per user. A user may have more than one
@@ -76,19 +232,11 @@ against a structured tag value.
 
 #### What is returned
 
-The Query Service returns `Resource` objects with shape `{ type, id, data }`,
-where `data` is the raw committee member snapshot. For each de-duplicated
-result the Persona Service extracts and returns a stub containing:
-
-- `data.committee_uid` and `data.committee_name` — for UI navigation.
-- `data.project_uid` and `data.project_slug` (from the committee's tags,
-  denormalised onto the member at index time) — for project-scoped routing.
-- `id` (the committee member UUID) — for deep-linking.
-- `data.role.name` and `data.voting.status` — the "group role" within the
-  board (e.g. Chair, Observer, Voting Rep, None); the UI decides how to
-  present or gate based on these values. The full set of valid role and voting
-  status values is defined by the Committee Service enum and carried
-  as-is; the Persona Service does not filter or interpret them.
+For each de-duplicated result, the Persona Service adds a `board_member`
+detection to the matching `projects[]` entry, with committee-level fields
+(`committee_uid`, `committee_name`, `committee_member_uid`, `role`,
+`voting_status`) carried in the detection's `extra` map. See the
+Request/Response section for the full field definitions.
 
 The Persona Service does **not** make access-control decisions based on role
 or voting status; it surfaces the data and defers gating entirely to the UI.
@@ -165,10 +313,9 @@ term clause may be overly liberal.
 
 #### What is returned
 
-For each matching project the Persona Service returns a stub containing:
-
-- `data.uid` and `data.slug` — for project-scoped routing.
-- `data.name` — for display.
+For each matching project the Persona Service adds an `executive_director`
+detection to the matching `projects[]` entry. No `extra` fields are attached.
+See the Request/Response section for the response shape.
 
 #### Alternate approach
 
@@ -176,19 +323,19 @@ As an alternative to the v1 Sync Helper pattern, the ED could be populated by
 polling the v1 Project Service API directly and writing results into the
 job-results DB. No implementation guidance is provided for this path.
 
-### Contributor
+### Community
 
-The "default view." The Contributor persona represents any project engagement
-the user has, drawn from four sources unioned together. It is intentionally
-out of scope for this service to define whether contributor status is a hard
+The "default view." The Community persona represents any project engagement
+the user has, drawn from six sources unioned together. It is intentionally
+out of scope for this service to define whether community membership is a hard
 gate or a softer navigation hint — this service is not access control.
 
 #### Output shape
 
-All four sources converge on the same output unit: a list of
-`{ project_uid, project_slug }` tuples (with optional extra context per
-source). The Persona Service unions these lists, de-duplicates by
-`project_uid`, and returns the merged set.
+All six sources converge on the same output unit. The Persona Service unions
+results across all sources, de-duplicates by `project_uid`, and returns each
+project once with a `detections[]` array listing every source token that
+matched it (see the Request/Response section for the full token table).
 
 #### CDP lookup flow (shared by sources 1 and 2)
 
@@ -241,11 +388,10 @@ during development against the CDP Snowflake schema.
 #### Source 2: CDP roles and affiliations
 
 From the `/project-affiliations` response, collect all entries. Each entry
-contributes a `{ projectSlug, projectName, projectLogo }` tuple to the
-Contributor project list. Entries where `roles[]` is non-empty additionally
-carry the role detail (`roles[].role`) as supplementary context for the UI
-— the UI may choose to surface these as a "Maintainer" label or similar, but
-the Persona Service does not treat them as a distinct persona type.
+produces a `cdp_roles` detection with `roles[]` and `contributionCount`
+passed through in `extra`. The UI is responsible for interpreting role data
+(e.g. surfacing a "Maintainer" label); the Persona Service does not filter
+or interpret roles.
 
 #### Source 3: Access control membership (writers and auditors)
 
@@ -289,7 +435,7 @@ the indexed project document, which would also cover ED and PMO contacts.
 #### Source 4: Committee membership
 
 Any project reachable via the user's committee memberships (Board or
-otherwise) implies contributor status. This data is already obtained as
+otherwise) implies community membership. This data is already obtained as
 a by-product of the Board Member persona query; the `project_uid` and
 `project_slug` values from those results can be folded in directly without
 an additional call.
@@ -321,15 +467,14 @@ same reason as all other `filters`-based lookups.
 - Confirm `data.username` (or equivalent) field name and whether it is
   reliably populated.
 - Confirm which `data.*` fields carry `project_uid` and `project_slug`
-  (or their equivalents) for the Contributor union output.
+  (or their equivalents) for the projects[] union output.
 
 #### What is returned (Source 5)
 
-For each de-duplicated mailing list membership, the Persona Service
-extracts a `{ project_uid, project_slug }` tuple for the Contributor
-output union. Additional stub fields (list name, subscription status)
-may be returned as supplementary context for the UI at the implementor's
-discretion.
+For each de-duplicated mailing list membership, the Persona Service adds a
+`mailing_list` detection to the matching `projects[]` entry. Supplementary
+context (list name, subscription status) may be surfaced via the detection's
+`extra` map at the implementor's discretion.
 
 The Persona Service does **not** treat mailing list subscription as a
 permission signal; it is a navigation hint only.
@@ -357,14 +502,14 @@ A local exact post-filter is required on the username leg results.
 - Confirm which `data.*` fields carry `project_uid` and `project_slug`.
 - Confirm whether attendance records cover both past attendance and future
   registrations, or only one; clarify whether both should contribute to
-  the Contributor project list.
+  the projects[] union output.
 
 #### What is returned (Source 6)
 
-For each de-duplicated attendance record, the Persona Service extracts a
-`{ project_uid, project_slug }` tuple for the Contributor output union.
-Additional context (event name, event date) may be returned as
-supplementary context for the UI at the implementor's discretion.
+For each de-duplicated attendance record, the Persona Service adds a
+`meeting_attendance` detection to the matching `projects[]` entry.
+Supplementary context (event name, event date) may be surfaced via the
+detection's `extra` map at the implementor's discretion.
 
 #### CDP flow dependency
 
