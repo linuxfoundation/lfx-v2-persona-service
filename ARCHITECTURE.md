@@ -387,24 +387,3 @@ graph LR
   ITX -->|"Persona Service worker async polling"| JR
   v1_DB["v1 DB"] -->|"TBD: async polling for v1 EDs\ninstead of implementing via realtime sync"| JR
 ```
-
-## Open questions
-
-- **`/me` service:** David raised the question of whether a consolidated `/me`
-  service is needed to report current roles. The current framing treats this
-  more as a UI component: aggregating data from multiple systems, organizing it
-  for UI consumption, and ensuring performance is a "UI churn" activity, not a
-  "business API." A NATS RPC endpoint (rather than a REST API) reflects this
-  distinction.
-
-- **ED sync strategy:** Decide between implementing a bidirectional v1↔v2 sync
-  for ED data versus polling v1 DB asynchronously via the job-results DB
-  pattern.
-
-- **Contributor gating:** Clarify whether "contributor" is a hard gate or a
-  softer "promoted navigation" hint. This is likely outside the scope of this
-  service.
-
-- **Query Service committee filtering:** Define what surface area Query Service
-  needs to expose to support "does user X have relationship Y to object Z?"
-  without leaking the `committee-member` pseudotype.
