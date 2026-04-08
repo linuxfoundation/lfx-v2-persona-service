@@ -19,23 +19,14 @@ type Config struct {
 	LFXBaseURL  string
 	LFXAudience string
 
-	CDPEnabled       bool
-	SnowflakeEnabled bool
+	CDPEnabled bool
 
 	// CDP credentials (populated only when CDPEnabled is true).
-	Auth0IssuerBaseURL string
-	Auth0ClientID      string
-	Auth0M2MPrivateBase64Key  string
-	CDPAudience        string
-	CDPBaseURL         string
-
-	// Snowflake credentials (populated only when SnowflakeEnabled is true).
-	SnowflakeAccount   string
-	SnowflakeUser      string
-	SnowflakeRole      string
-	SnowflakeDatabase  string
-	SnowflakeWarehouse string
-	SnowflakeAPIKey    string
+	Auth0IssuerBaseURL       string
+	Auth0ClientID            string
+	Auth0M2MPrivateBase64Key string
+	CDPAudience              string
+	CDPBaseURL               string
 }
 
 // Load reads configuration from environment variables and determines which
@@ -72,29 +63,6 @@ func Load() Config {
 		)
 	} else {
 		slog.Info("CDP capability enabled")
-	}
-
-	// Snowflake credential group — all six must be present to enable.
-	cfg.SnowflakeAccount = os.Getenv(constants.SnowflakeAccountEnvKey)
-	cfg.SnowflakeUser = os.Getenv(constants.SnowflakeUserEnvKey)
-	cfg.SnowflakeRole = os.Getenv(constants.SnowflakeRoleEnvKey)
-	cfg.SnowflakeDatabase = os.Getenv(constants.SnowflakeDatabaseEnvKey)
-	cfg.SnowflakeWarehouse = os.Getenv(constants.SnowflakeWarehouseEnvKey)
-	cfg.SnowflakeAPIKey = os.Getenv(constants.SnowflakeAPIKeyEnvKey)
-
-	cfg.SnowflakeEnabled = cfg.SnowflakeAccount != "" &&
-		cfg.SnowflakeUser != "" &&
-		cfg.SnowflakeRole != "" &&
-		cfg.SnowflakeDatabase != "" &&
-		cfg.SnowflakeWarehouse != "" &&
-		cfg.SnowflakeAPIKey != ""
-
-	if !cfg.SnowflakeEnabled {
-		slog.Warn("Snowflake credentials incomplete — source cdp_activity will be disabled",
-			"hint", "set SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_ROLE, SNOWFLAKE_DATABASE, SNOWFLAKE_WAREHOUSE, SNOWFLAKE_API_KEY to enable",
-		)
-	} else {
-		slog.Info("Snowflake capability enabled")
 	}
 
 	return cfg

@@ -29,12 +29,3 @@ const (
 	CDPBaseURLEnvKey               = "CDP_BASE_URL"
 )
 
-// Environment variable keys for Snowflake (optional group).
-const (
-	SnowflakeAccountEnvKey   = "SNOWFLAKE_ACCOUNT"
-	SnowflakeUserEnvKey      = "SNOWFLAKE_USER"
-	SnowflakeRoleEnvKey      = "SNOWFLAKE_ROLE"
-	SnowflakeDatabaseEnvKey  = "SNOWFLAKE_DATABASE"
-	SnowflakeWarehouseEnvKey = "SNOWFLAKE_WAREHOUSE"
-	SnowflakeAPIKeyEnvKey    = "SNOWFLAKE_API_KEY"
-)
