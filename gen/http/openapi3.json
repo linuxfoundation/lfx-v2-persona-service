@@ -1,0 +1,1 @@
+{"openapi":"3.0.3","info":{"title":"LFX v2 Persona Service","description":"Persona service providing NATS-based user persona aggregation with health endpoints","version":"1.0"},"servers":[{"url":"http://localhost:80","description":"Default server for persona"}],"paths":{},"components":{},"tags":[{"name":"persona-service","description":"Persona service health endpoints"}]}
