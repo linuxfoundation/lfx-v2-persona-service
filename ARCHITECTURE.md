@@ -609,12 +609,6 @@ All configuration is injected via environment variables. Variable names below fo
 | `AUTH0_M2M_PRIVATE_BASE64_KEY` | CDP / LFX gateway | Base64-encoded RSA private key for signing client assertion JWTs (replaces client secret). |
 | `CDP_AUDIENCE` | CDP only | Auth0 audience string for the CDP API. |
 | `CDP_BASE_URL` | CDP only | Base URL for the CDP API (e.g. `https://api-gw.platform.linuxfoundation.org/cdp`). |
-| `SNOWFLAKE_ACCOUNT` | Snowflake only | Snowflake account identifier. |
-| `SNOWFLAKE_USER` | Snowflake only | Snowflake user (service account). |
-| `SNOWFLAKE_ROLE` | Snowflake only | Snowflake role to assume. |
-| `SNOWFLAKE_DATABASE` | Snowflake only | Snowflake database name. |
-| `SNOWFLAKE_WAREHOUSE` | Snowflake only | Snowflake virtual warehouse. |
-| `SNOWFLAKE_API_KEY` | Snowflake only | RSA private key (PEM) for Snowflake JWT auth. |
 | `QUERY_SERVICE_URL` | see notes | Base URL of the Query Service for direct access (e.g. `http://query-service`). Either this or `LFX_BASE_URL` must be set. |
 | `LFX_BASE_URL` | see notes | Base URL of the LFX API gateway (e.g. `https://api-gw.platform.linuxfoundation.org`). Used when `QUERY_SERVICE_URL` is not set; requires Auth0 credentials and `LFX_AUDIENCE`. |
 | `LFX_AUDIENCE` | with `LFX_BASE_URL` | Auth0 audience string for the LFX API gateway. Required when using `LFX_BASE_URL`. |

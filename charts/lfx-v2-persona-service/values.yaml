@@ -43,7 +43,7 @@ nats:
   url: nats://lfx-platform-nats.lfx.svc.cluster.local:4222
 
   # persona_cache_kv_bucket is the configuration for the NATS KV bucket
-  # used for caching CDP and Snowflake data
+  # used for caching CDP data
   persona_cache_kv_bucket:
     # creation is a boolean to determine if the KV bucket should be created via the helm chart.
     creation: true
@@ -112,19 +112,6 @@ app:
     CDP_BASE_URL:
       value: null
 
-    # Snowflake configuration (optional — autodegrades when absent)
-    SNOWFLAKE_ACCOUNT:
-      value: null
-    SNOWFLAKE_USER:
-      value: null
-    SNOWFLAKE_ROLE:
-      value: null
-    SNOWFLAKE_DATABASE:
-      value: null
-    SNOWFLAKE_WAREHOUSE:
-      value: null
-    SNOWFLAKE_API_KEY:
-      value: null
 
   # extraEnv allows injecting additional environment variables
   extraEnv: []
