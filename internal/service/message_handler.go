@@ -197,7 +197,7 @@ func (h *personaHandler) sourceCDPRoles(ctx context.Context, req *model.PersonaR
 	return affiliationsToProjects(affiliations, slugMap)
 }
 
-const projectServiceSlugToUID = "lfx.project-service.slug_to_uid"
+const projectServiceSlugToUID = "lfx.projects-api.slug_to_uid"
 
 // resolveSlugsToUIDs resolves CDP project slugs to v2 project UIDs in parallel
 // via the project service NATS endpoint. Returns a map of slug → v2 UID.
