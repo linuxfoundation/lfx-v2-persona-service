@@ -20,17 +20,7 @@ import (
 //  2. All committee_member query (no category filter) → committee_member detections (Source 4)
 //
 // Both share the same username→sub resolution.
-func (h *personaHandler) sourceBoardMemberAndCommittee(ctx context.Context, req *model.PersonaRequest) ([]model.Project, error) {
-	// Resolve username → sub once (shared by all legs).
-	var sub string
-	if req.Username != "" {
-		var err error
-		sub, err = h.resolveUsernameToSub(ctx, req.Username)
-		if err != nil {
-			slog.WarnContext(ctx, "username→sub resolution failed", "error", err)
-		}
-	}
-
+func (h *personaHandler) sourceBoardMemberAndCommittee(ctx context.Context, req *model.PersonaRequest, sub string) ([]model.Project, error) {
 	// Run Board-only and All-committee queries in parallel.
 	type branchResult struct {
 		resources []query.Resource
@@ -288,38 +278,6 @@ func (h *personaHandler) resolveCommittees(ctx context.Context, members []query.
 	}
 
 	return out, firstErr
-}
-
-const authServiceUsernameToSub = "lfx.auth-service.username_to_sub"
-
-// resolveUsernameToSub calls the auth service via NATS to translate an LFX
-// username into an Auth0 sub (e.g. "auth0|abc123"). Returns empty string if
-// the user is not found.
-func (h *personaHandler) resolveUsernameToSub(ctx context.Context, username string) (string, error) {
-	if h.natsClient == nil {
-		return "", fmt.Errorf("NATS client not available for username→sub lookup")
-	}
-
-	resp, err := h.natsClient.Request(ctx, authServiceUsernameToSub, []byte(username))
-	if err != nil {
-		return "", fmt.Errorf("auth service username_to_sub: %w", err)
-	}
-
-	// On error the auth service returns JSON like {"success":false,"error":"..."}
-	if len(resp) > 0 && resp[0] == '{' {
-		slog.WarnContext(ctx, "username→sub lookup returned error response",
-			"username", username,
-			"response", string(resp),
-		)
-		return "", nil
-	}
-
-	sub := strings.TrimSpace(string(resp))
-	slog.DebugContext(ctx, "resolved username to sub",
-		"username", username,
-		"sub", sub,
-	)
-	return sub, nil
 }
 
 // boardMemberDetections converts committee_member resources into board_member

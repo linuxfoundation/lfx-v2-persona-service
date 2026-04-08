@@ -274,10 +274,10 @@ Determined by a denormalized ED field on the v2 project object, carrying the
 ED's username, display name, and email — the same pattern used for `writers`
 and `auditors` on the project model.
 
-#### Prerequisites (not yet implemented)
+#### Prerequisites (completed)
 
-The ED field does not currently exist on the v2 project model. Before the
-Persona Service can serve this persona, two pieces of work are required:
+The ED field is now present on the v2 project model. The following work was
+required to enable this persona:
 
 1. **v2 Project Service** — add an `executive_director` field (or equivalent)
    to the project create/update API and the indexed project document, storing
