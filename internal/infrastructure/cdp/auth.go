@@ -133,9 +133,16 @@ func (s *assertionTokenSource) signAssertion() (string, error) {
 }
 
 func decodePrivateKey(b64 string) (*rsa.PrivateKey, error) {
-	keyBytes, err := base64.StdEncoding.DecodeString(b64)
-	if err != nil {
-		return nil, fmt.Errorf("decode private key base64: %w", err)
+	var keyBytes []byte
+	if strings.HasPrefix(strings.TrimSpace(b64), "-----BEGIN") {
+		// Raw PEM provided (e.g. injected directly by Kubernetes secret).
+		keyBytes = []byte(b64)
+	} else {
+		var err error
+		keyBytes, err = base64.StdEncoding.DecodeString(b64)
+		if err != nil {
+			return nil, fmt.Errorf("decode private key base64: %w", err)
+		}
 	}
 
 	block, _ := pem.Decode(keyBytes)
