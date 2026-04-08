@@ -106,6 +106,16 @@ func (h *personaHandler) GetPersona(ctx context.Context, msg port.TransportMesse
 		}()
 	}
 
+	// Source 5: Mailing list subscriptions.
+	if h.queryClient != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			p, err := h.sourceMailingList(ctx, &req, sub)
+			results <- sourceResult{p, err, "mailing_list"}
+		}()
+	}
+
 	// Source 2: CDP roles and affiliations.
 	if h.cdpClient != nil {
 		wg.Add(1)
