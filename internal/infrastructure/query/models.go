@@ -64,3 +64,13 @@ type GroupsIOMemberData struct {
 	ProjectUID     string `json:"project_uid"`
 	ProjectSlug    string `json:"project_slug"`
 }
+
+// MeetingParticipantData represents the data fields on a v1_past_meeting_participant resource.
+type MeetingParticipantData struct {
+	Username    string `json:"username"`
+	Email       string `json:"email"`
+	IsAttended  bool   `json:"is_attended"`
+	IsInvited   bool   `json:"is_invited"`
+	ProjectUID  string `json:"project_uid"`
+	ProjectSlug string `json:"project_slug"`
+}
