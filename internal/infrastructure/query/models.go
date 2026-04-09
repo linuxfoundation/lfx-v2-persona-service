@@ -55,3 +55,12 @@ type ProjectData struct {
 	Writers  []string `json:"writers"`
 	Auditors []string `json:"auditors"`
 }
+
+// GroupsIOMemberData represents the data fields on a groupsio_member resource.
+type GroupsIOMemberData struct {
+	Username       string `json:"username"`
+	Email          string `json:"email"`
+	MailingListUID string `json:"mailing_list_uid"`
+	ProjectUID     string `json:"project_uid"`
+	ProjectSlug    string `json:"project_slug"`
+}
