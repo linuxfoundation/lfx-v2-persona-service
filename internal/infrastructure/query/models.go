@@ -49,11 +49,19 @@ type CommitteeData struct {
 	ProjectName string `json:"project_name"`
 }
 
-// ProjectData represents the data fields on a project resource.
+// ProjectData represents the data fields on a project_settings resource.
 type ProjectData struct {
-	Slug     string   `json:"slug"`
-	Writers  []string `json:"writers"`
-	Auditors []string `json:"auditors"`
+	UID      string          `json:"uid"`
+	Writers  []ProjectPerson `json:"writers"`
+	Auditors []ProjectPerson `json:"auditors"`
+}
+
+// ProjectPerson represents a person entry in a project's writers or auditors list.
+type ProjectPerson struct {
+	Avatar   string `json:"avatar"`
+	Email    string `json:"email"`
+	Name     string `json:"name"`
+	Username string `json:"username"`
 }
 
 // GroupsIOMemberData represents the data fields on a groupsio_member resource.
