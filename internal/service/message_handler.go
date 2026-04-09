@@ -106,6 +106,16 @@ func (h *personaHandler) GetPersona(ctx context.Context, msg port.TransportMesse
 		}()
 	}
 
+	// Source 3: Access control (writers/auditors).
+	if h.queryClient != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			p, err := h.sourceWriterAuditor(ctx, &req, sub)
+			results <- sourceResult{p, err, "writer_auditor"}
+		}()
+	}
+
 	// Source 5: Mailing list subscriptions.
 	if h.queryClient != nil {
 		wg.Add(1)

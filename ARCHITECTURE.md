@@ -397,18 +397,21 @@ or interpret roles.
 
 Any project for which the user holds a `writer` or `auditor` relationship
 is identified via a Query Service term filter against `data.writers` and
-`data.auditors`, which are present on the indexed project document today:
+`data.auditors`, which are present on the indexed `project_settings`
+document today. Writers and auditors are arrays of objects with `username`,
+`email`, `name`, and `avatar` fields; the filter uses dot-notation to
+match on the nested `username`:
 
 ```
-type=project
-filters=writers:<username>
+type=project_settings
+filters=writers.username:<username>
 ```
 
 and in parallel:
 
 ```
-type=project
-filters=auditors:<username>
+type=project_settings
+filters=auditors.username:<username>
 ```
 
 Results from both legs are de-duplicated by `Resource.id` before merging.
