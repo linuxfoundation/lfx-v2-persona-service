@@ -25,6 +25,8 @@ type CommitteeMemberData struct {
 	Email         string                    `json:"email"`
 	CommitteeUID  string                    `json:"committee_uid"`
 	CommitteeName string                    `json:"committee_name"`
+	ProjectUID    string                    `json:"project_uid"`
+	ProjectSlug   string                    `json:"project_slug"`
 	Role          CommitteeMemberRole       `json:"role"`
 	Voting        CommitteeMemberVote       `json:"voting"`
 	Organization  CommitteeMemberOrg        `json:"organization"`
@@ -47,15 +49,6 @@ type CommitteeMemberVote struct {
 	Status string `json:"status"`
 }
 
-// CommitteeData represents the data fields on a committee resource.
-type CommitteeData struct {
-	UID         string `json:"uid"`
-	Name        string `json:"name"`
-	Category    string `json:"category"`
-	ProjectUID  string `json:"project_uid"`
-	ProjectSlug string `json:"project_slug"`
-	ProjectName string `json:"project_name"`
-}
 
 // ProjectData represents the data fields on a project_settings resource.
 type ProjectData struct {
