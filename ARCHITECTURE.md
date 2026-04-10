@@ -84,7 +84,12 @@ The caller issues a NATS request/reply on this subject and awaits a single reply
             "committee_name": "TAC",
             "committee_member_uid": "...",
             "role": "Chair",
-            "voting_status": "Voting Rep"
+            "voting_status": "Voting Rep",
+            "organization": {
+              "id": "0014100000Te2ovAAB",
+              "name": "The Linux Foundation",
+              "website": "http://linuxfoundation.org"
+            }
           }
         },
         {
@@ -134,7 +139,7 @@ One entry per unique `project_uid`. A project that matches via multiple sources 
 
 | Token | Source | `extra` fields (when present) |
 |-------|--------|-------------------------------|
-| `board_member` | Board Member — committee query | `committee_uid`, `committee_name`, `committee_member_uid`, `role`, `voting_status` |
+| `board_member` | Board Member — committee query | `committee_uid`, `committee_name`, `committee_member_uid`, `role`, `voting_status`, `organization` (`id`, `name`, `website`) |
 | `executive_director` | Executive Director — project query | _(none)_ |
 | `cdp_activity` | Source 1 — Snowflake activity | _(none)_ |
 | `cdp_roles` | Source 2 — CDP affiliations | `contributionCount` (number), `roles[]` (passed through as-is from CDP; see shape below) |

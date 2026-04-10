@@ -51,11 +51,19 @@ const (
 
 // BoardMemberExtra is the extra payload for a board_member detection.
 type BoardMemberExtra struct {
-	CommitteeUID       string `json:"committee_uid"`
-	CommitteeName      string `json:"committee_name"`
-	CommitteeMemberUID string `json:"committee_member_uid"`
-	Role               string `json:"role"`
-	VotingStatus       string `json:"voting_status"`
+	CommitteeUID       string                 `json:"committee_uid"`
+	CommitteeName      string                 `json:"committee_name"`
+	CommitteeMemberUID string                 `json:"committee_member_uid"`
+	Role               string                 `json:"role"`
+	VotingStatus       string                 `json:"voting_status"`
+	Organization       BoardMemberOrganization `json:"organization"`
+}
+
+// BoardMemberOrganization is the organization context for a board_member detection.
+type BoardMemberOrganization struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Website string `json:"website"`
 }
 
 // CommitteeMemberExtra is the extra payload for a committee_member detection (Source 4).

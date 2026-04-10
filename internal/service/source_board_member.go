@@ -302,6 +302,11 @@ func boardMemberDetections(resources []query.Resource, committeeMap map[string]q
 			CommitteeMemberUID: r.ID,
 			Role:               data.Role.Name,
 			VotingStatus:       data.Voting.Status,
+			Organization: model.BoardMemberOrganization{
+				ID:      data.Organization.ID,
+				Name:    data.Organization.Name,
+				Website: data.Organization.Website,
+			},
 		}
 		extraJSON, err := json.Marshal(extra)
 		if err != nil {

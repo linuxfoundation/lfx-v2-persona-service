@@ -21,12 +21,20 @@ type Resource struct {
 
 // CommitteeMemberData represents the data fields on a committee_member resource.
 type CommitteeMemberData struct {
-	Username      string              `json:"username"`
-	Email         string              `json:"email"`
-	CommitteeUID  string              `json:"committee_uid"`
-	CommitteeName string              `json:"committee_name"`
-	Role          CommitteeMemberRole `json:"role"`
-	Voting        CommitteeMemberVote `json:"voting"`
+	Username      string                    `json:"username"`
+	Email         string                    `json:"email"`
+	CommitteeUID  string                    `json:"committee_uid"`
+	CommitteeName string                    `json:"committee_name"`
+	Role          CommitteeMemberRole       `json:"role"`
+	Voting        CommitteeMemberVote       `json:"voting"`
+	Organization  CommitteeMemberOrg        `json:"organization"`
+}
+
+// CommitteeMemberOrg is the nested organization object on a committee_member.
+type CommitteeMemberOrg struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Website string `json:"website"`
 }
 
 // CommitteeMemberRole is the nested role object on a committee_member.
