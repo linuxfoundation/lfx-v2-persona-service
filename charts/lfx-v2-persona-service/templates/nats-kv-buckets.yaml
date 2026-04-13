@@ -12,7 +12,8 @@ metadata:
     helm.sh/resource-policy: keep
   {{- end }}
 spec:
-  name: {{ .Values.nats.persona_cache_kv_bucket.name }}
+  bucket: {{ .Values.nats.persona_cache_kv_bucket.name }}
+  replicas: {{ .Values.nats.persona_cache_kv_bucket.replicas }}
   history: {{ .Values.nats.persona_cache_kv_bucket.history }}
   storage: {{ .Values.nats.persona_cache_kv_bucket.storage }}
   maxValueSize: {{ .Values.nats.persona_cache_kv_bucket.maxValueSize }}
