@@ -63,6 +63,8 @@ nats:
     compression: true
     # ttl is the time-to-live for entries in the bucket (24 hours per architecture spec)
     ttl: 24h
+    # replicas is the number of bucket replicas
+    replicas: 1
 
 # serviceAccount is the configuration for the Kubernetes service account
 serviceAccount:
