@@ -6,7 +6,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -55,7 +54,7 @@ func (h *personaHandler) sourceBoardMemberAndCommittee(ctx context.Context, req 
 		slog.ErrorContext(ctx, "all committee member query failed", "error", allResult.err)
 	}
 
-	// Collect all unique members across both branches for committee resolution.
+	// Collect all unique members across both branches.
 	allMembers := deduplicateResources(boardResult.resources, allResult.resources)
 
 	slog.DebugContext(ctx, "committee member queries returned",
@@ -68,18 +67,10 @@ func (h *personaHandler) sourceBoardMemberAndCommittee(ctx context.Context, req 
 		return nil, nil
 	}
 
-	// Resolve committee UIDs → project info (shared by both detection types).
-	committeeMap, err := h.resolveCommittees(ctx, allMembers)
-	if err != nil {
-		slog.WarnContext(ctx, "committee→project resolution partially failed", "error", err)
-	}
-
-	slog.DebugContext(ctx, "committee resolution done", "resolved", len(committeeMap))
-
 	// Board Member detections from Board-only results.
-	bmProjects := boardMemberDetections(boardResult.resources, committeeMap)
+	bmProjects := boardMemberDetections(boardResult.resources)
 	// Source 4 detections from ALL committee results.
-	cmProjects := committeeMemberDetections(allMembers, committeeMap)
+	cmProjects := committeeMemberDetections(allMembers)
 
 	return model.MergeProjects(bmProjects, cmProjects), nil
 }
@@ -208,81 +199,9 @@ func deduplicateResources(slices ...[]query.Resource) []query.Resource {
 	return out
 }
 
-// resolveCommittees fetches committee resources in parallel to resolve
-// committee_uid → project info. Returns a map of committee_uid → CommitteeData.
-func (h *personaHandler) resolveCommittees(ctx context.Context, members []query.Resource) (map[string]query.CommitteeData, error) {
-	unique := make(map[string]bool)
-	for _, r := range members {
-		var data query.CommitteeMemberData
-		if err := json.Unmarshal(r.Data, &data); err != nil {
-			slog.WarnContext(ctx, "failed to unmarshal committee_member data for UID extraction",
-				"id", r.ID,
-				"error", err,
-				"raw_data_len", len(r.Data),
-			)
-			continue
-		}
-		unique[data.CommitteeUID] = true
-	}
-
-	slog.DebugContext(ctx, "unique committee UIDs to resolve", "count", len(unique))
-
-	type result struct {
-		uid  string
-		data query.CommitteeData
-		err  error
-	}
-
-	var wg sync.WaitGroup
-	ch := make(chan result, len(unique))
-
-	for uid := range unique {
-		wg.Add(1)
-		go func(committeeUID string) {
-			defer wg.Done()
-			resources, err := h.queryClient.Search(ctx, query.SearchParams{
-				Type:    "committee",
-				TagsAll: []string{committeeUID},
-			})
-			if err != nil {
-				ch <- result{uid: committeeUID, err: err}
-				return
-			}
-			if len(resources) == 0 {
-				ch <- result{uid: committeeUID, err: fmt.Errorf("committee %s not found", committeeUID)}
-				return
-			}
-			var cd query.CommitteeData
-			if err := json.Unmarshal(resources[0].Data, &cd); err != nil {
-				ch <- result{uid: committeeUID, err: err}
-				return
-			}
-			ch <- result{uid: committeeUID, data: cd}
-		}(uid)
-	}
-
-	wg.Wait()
-	close(ch)
-
-	out := make(map[string]query.CommitteeData, len(unique))
-	var firstErr error
-	for r := range ch {
-		if r.err != nil {
-			slog.WarnContext(ctx, "failed to resolve committee", "committee_uid", r.uid, "error", r.err)
-			if firstErr == nil {
-				firstErr = r.err
-			}
-			continue
-		}
-		out[r.uid] = r.data
-	}
-
-	return out, firstErr
-}
-
 // boardMemberDetections converts committee_member resources into board_member
-// detections, using committeeMap to resolve project info.
-func boardMemberDetections(resources []query.Resource, committeeMap map[string]query.CommitteeData) []model.Project {
+// detections, reading project info directly from the enriched record.
+func boardMemberDetections(resources []query.Resource) []model.Project {
 	var projects []model.Project
 
 	for _, r := range resources {
@@ -290,9 +209,7 @@ func boardMemberDetections(resources []query.Resource, committeeMap map[string]q
 		if err := json.Unmarshal(r.Data, &data); err != nil {
 			continue
 		}
-
-		committee, ok := committeeMap[data.CommitteeUID]
-		if !ok {
+		if data.ProjectUID == "" {
 			continue
 		}
 
@@ -314,8 +231,8 @@ func boardMemberDetections(resources []query.Resource, committeeMap map[string]q
 		}
 
 		projects = append(projects, model.Project{
-			ProjectUID:  committee.ProjectUID,
-			ProjectSlug: committee.ProjectSlug,
+			ProjectUID:  data.ProjectUID,
+			ProjectSlug: data.ProjectSlug,
 			Detections: []model.Detection{
 				{Source: model.SourceBoardMember, Extra: extraJSON},
 			},
@@ -326,8 +243,8 @@ func boardMemberDetections(resources []query.Resource, committeeMap map[string]q
 }
 
 // committeeMemberDetections converts committee_member resources into Source 4
-// committee_member detections, using committeeMap to resolve project info.
-func committeeMemberDetections(resources []query.Resource, committeeMap map[string]query.CommitteeData) []model.Project {
+// committee_member detections, reading project info directly from the enriched record.
+func committeeMemberDetections(resources []query.Resource) []model.Project {
 	var projects []model.Project
 
 	for _, r := range resources {
@@ -335,9 +252,7 @@ func committeeMemberDetections(resources []query.Resource, committeeMap map[stri
 		if err := json.Unmarshal(r.Data, &data); err != nil {
 			continue
 		}
-
-		committee, ok := committeeMap[data.CommitteeUID]
-		if !ok {
+		if data.ProjectUID == "" {
 			continue
 		}
 
@@ -353,8 +268,8 @@ func committeeMemberDetections(resources []query.Resource, committeeMap map[stri
 		}
 
 		projects = append(projects, model.Project{
-			ProjectUID:  committee.ProjectUID,
-			ProjectSlug: committee.ProjectSlug,
+			ProjectUID:  data.ProjectUID,
+			ProjectSlug: data.ProjectSlug,
 			Detections: []model.Detection{
 				{Source: model.SourceCommitteeMember, Extra: extraJSON},
 			},
