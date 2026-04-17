@@ -16,8 +16,10 @@ import (
 
 // sourceWriterAuditor queries the Query Service for project resources where
 // the user's Auth0 sub appears in data.writers or data.auditors. Two parallel
-// filter legs are issued, de-duplicated by Resource.id, with a local exact
-// post-filter on the username field within each person entry.
+// filter legs are issued. Each leg produces its own detection token (writer or
+// auditor). A project where the user holds both roles receives both detections
+// on a single project entry. A local exact post-filter is applied per-leg,
+// checking only the relevant array, to guard against overly liberal term matches.
 func (h *personaHandler) sourceWriterAuditor(ctx context.Context, req *model.PersonaRequest, sub string) ([]model.Project, error) {
 	if sub == "" {
 		return nil, nil
@@ -70,42 +72,45 @@ func (h *personaHandler) sourceWriterAuditor(ctx context.Context, req *model.Per
 		return nil, writersResult.err
 	}
 
-	// De-duplicate by Resource.id with local exact post-filter.
-	seen := make(map[string]bool)
-	var merged []query.Resource
+	// Track which source token(s) matched per Resource.ID.
+	type projectMatch struct {
+		resource query.Resource
+		sources  []string
+	}
+	matches := make(map[string]*projectMatch)
 
 	for _, r := range writersResult.resources {
-		if seen[r.ID] {
+		if !projectContainsWriter(r.Data, sub) {
 			continue
 		}
-		if !projectContainsUser(r.Data, sub) {
-			continue
+		if m, ok := matches[r.ID]; ok {
+			m.sources = append(m.sources, model.SourceWriter)
+		} else {
+			matches[r.ID] = &projectMatch{resource: r, sources: []string{model.SourceWriter}}
 		}
-		seen[r.ID] = true
-		merged = append(merged, r)
 	}
 
 	for _, r := range auditorsResult.resources {
-		if seen[r.ID] {
+		if !projectContainsAuditor(r.Data, sub) {
 			continue
 		}
-		if !projectContainsUser(r.Data, sub) {
-			continue
+		if m, ok := matches[r.ID]; ok {
+			m.sources = append(m.sources, model.SourceAuditor)
+		} else {
+			matches[r.ID] = &projectMatch{resource: r, sources: []string{model.SourceAuditor}}
 		}
-		seen[r.ID] = true
-		merged = append(merged, r)
 	}
 
 	slog.DebugContext(ctx, "writer/auditor queries returned",
 		"writers_count", len(writersResult.resources),
 		"auditors_count", len(auditorsResult.resources),
-		"deduped_total", len(merged),
+		"matched_projects", len(matches),
 	)
 
 	var projects []model.Project
-	for _, r := range merged {
+	for _, m := range matches {
 		var data query.ProjectData
-		if err := json.Unmarshal(r.Data, &data); err != nil {
+		if err := json.Unmarshal(m.resource.Data, &data); err != nil {
 			continue
 		}
 		if data.UID == "" {
@@ -114,21 +119,24 @@ func (h *personaHandler) sourceWriterAuditor(ctx context.Context, req *model.Per
 
 		slug := h.resolveProjectSlug(ctx, data.UID)
 
+		detections := make([]model.Detection, 0, len(m.sources))
+		for _, src := range m.sources {
+			detections = append(detections, model.Detection{Source: src})
+		}
+
 		projects = append(projects, model.Project{
 			ProjectUID:  data.UID,
 			ProjectSlug: slug,
-			Detections: []model.Detection{
-				{Source: model.SourceWriterAuditor},
-			},
+			Detections:  detections,
 		})
 	}
 
 	return projects, nil
 }
 
-// projectContainsUser checks whether sub appears as a username in the
-// project's writers or auditors arrays (case-insensitive).
-func projectContainsUser(raw json.RawMessage, sub string) bool {
+// projectContainsWriter checks whether sub appears as a username in the
+// project's writers array (case-insensitive).
+func projectContainsWriter(raw json.RawMessage, sub string) bool {
 	var data query.ProjectData
 	if err := json.Unmarshal(raw, &data); err != nil {
 		return false
@@ -137,6 +145,16 @@ func projectContainsUser(raw json.RawMessage, sub string) bool {
 		if strings.EqualFold(w.Username, sub) {
 			return true
 		}
+	}
+	return false
+}
+
+// projectContainsAuditor checks whether sub appears as a username in the
+// project's auditors array (case-insensitive).
+func projectContainsAuditor(raw json.RawMessage, sub string) bool {
+	var data query.ProjectData
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return false
 	}
 	for _, a := range data.Auditors {
 		if strings.EqualFold(a.Username, sub) {

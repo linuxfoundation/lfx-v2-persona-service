@@ -112,7 +112,7 @@ func (h *personaHandler) GetPersona(ctx context.Context, msg port.TransportMesse
 		go func() {
 			defer wg.Done()
 			p, err := h.sourceWriterAuditor(ctx, &req, sub)
-			results <- sourceResult{p, err, "writer_auditor"}
+			results <- sourceResult{p, err, "writer+auditor"}
 		}()
 	}
 

@@ -143,7 +143,8 @@ One entry per unique `project_uid`. A project that matches via multiple sources 
 | `executive_director` | Executive Director — project query | _(none)_ |
 | `cdp_activity` | Source 1 — Snowflake activity | _(none)_ |
 | `cdp_roles` | Source 2 — CDP affiliations | `contributionCount` (number), `roles[]` (passed through as-is from CDP; see shape below) |
-| `writer_auditor` | Source 3 — access control | _(none)_ |
+| `writer` | Source 3a — project writer | _(none)_ |
+| `auditor` | Source 3b — project auditor | _(none)_ |
 | `committee_member` | Source 4 — non-Board committee membership | `committee_uid`, `committee_name`, `committee_member_uid`, `role` |
 | `mailing_list` | Source 5 — mailing list subscriptions | _(none)_ |
 | `meeting_attendance` | Source 6 — meeting attendance | _(none)_ |
@@ -419,9 +420,14 @@ type=project_settings
 filters=auditors.username:<username>
 ```
 
-Results from both legs are de-duplicated by `Resource.id` before merging.
-A local exact post-filter must be applied for the same reason as other
-`filters`-based lookups — the term clause may be overly liberal.
+Results from both legs are tracked independently. Each leg that matches
+produces its own detection (`writer` or `auditor`). A project where the
+user appears in both `data.writers` and `data.auditors` receives both
+detection tokens on a single project entry. A local exact post-filter
+must be applied per-leg for the same reason as other `filters`-based
+lookups — the term clause may be overly liberal. Each post-filter checks
+only the relevant array (`data.writers` for the writers leg,
+`data.auditors` for the auditors leg) to avoid false positives.
 
 #### Source 3 future extension: Project contacts index
 
