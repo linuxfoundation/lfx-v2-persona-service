@@ -11,6 +11,8 @@ metadata:
   annotations:
     helm.sh/resource-policy: keep
   {{- end }}
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
 spec:
   bucket: {{ .Values.nats.persona_cache_kv_bucket.name }}
   replicas: {{ .Values.nats.persona_cache_kv_bucket.replicas }}
