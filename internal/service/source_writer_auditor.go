@@ -15,13 +15,14 @@ import (
 )
 
 // sourceWriterAuditor queries the Query Service for project resources where
-// the user's Auth0 sub appears in data.writers or data.auditors. Two parallel
-// filter legs are issued. Each leg produces its own detection token (writer or
-// auditor). A project where the user holds both roles receives both detections
-// on a single project entry. A local exact post-filter is applied per-leg,
-// checking only the relevant array, to guard against overly liberal term matches.
-func (h *personaHandler) sourceWriterAuditor(ctx context.Context, req *model.PersonaRequest, sub string) ([]model.Project, error) {
-	if sub == "" {
+// the caller's LFX username appears in data.writers or data.auditors. Two
+// parallel filter legs are issued. Each leg produces its own detection token
+// (writer or auditor). A project where the user holds both roles receives both
+// detections on a single project entry. A local exact post-filter is applied
+// per-leg, checking only the relevant array, to guard against overly liberal
+// term matches.
+func (h *personaHandler) sourceWriterAuditor(ctx context.Context, req *model.PersonaRequest) ([]model.Project, error) {
+	if req.Username == "" {
 		return nil, nil
 	}
 
@@ -40,7 +41,7 @@ func (h *personaHandler) sourceWriterAuditor(ctx context.Context, req *model.Per
 		defer wg.Done()
 		resources, err := h.queryClient.Search(ctx, query.SearchParams{
 			Type:    "project_settings",
-			Filters: []string{"writers.username:" + sub},
+			Filters: []string{"writers.username:" + req.Username},
 		})
 		writersCh <- legResult{resources, err}
 	}()
@@ -51,7 +52,7 @@ func (h *personaHandler) sourceWriterAuditor(ctx context.Context, req *model.Per
 		defer wg.Done()
 		resources, err := h.queryClient.Search(ctx, query.SearchParams{
 			Type:    "project_settings",
-			Filters: []string{"auditors.username:" + sub},
+			Filters: []string{"auditors.username:" + req.Username},
 		})
 		auditorsCh <- legResult{resources, err}
 	}()
@@ -80,7 +81,7 @@ func (h *personaHandler) sourceWriterAuditor(ctx context.Context, req *model.Per
 	matches := make(map[string]*projectMatch)
 
 	for _, r := range writersResult.resources {
-		if !projectContainsWriter(r.Data, sub) {
+		if !projectContainsWriter(r.Data, req.Username) {
 			continue
 		}
 		if m, ok := matches[r.ID]; ok {
@@ -91,7 +92,7 @@ func (h *personaHandler) sourceWriterAuditor(ctx context.Context, req *model.Per
 	}
 
 	for _, r := range auditorsResult.resources {
-		if !projectContainsAuditor(r.Data, sub) {
+		if !projectContainsAuditor(r.Data, req.Username) {
 			continue
 		}
 		if m, ok := matches[r.ID]; ok {
@@ -134,30 +135,30 @@ func (h *personaHandler) sourceWriterAuditor(ctx context.Context, req *model.Per
 	return projects, nil
 }
 
-// projectContainsWriter checks whether sub appears as a username in the
-// project's writers array (case-insensitive).
-func projectContainsWriter(raw json.RawMessage, sub string) bool {
+// projectContainsWriter checks whether username appears in the project's
+// writers array (case-insensitive).
+func projectContainsWriter(raw json.RawMessage, username string) bool {
 	var data query.ProjectData
 	if err := json.Unmarshal(raw, &data); err != nil {
 		return false
 	}
 	for _, w := range data.Writers {
-		if strings.EqualFold(w.Username, sub) {
+		if strings.EqualFold(w.Username, username) {
 			return true
 		}
 	}
 	return false
 }
 
-// projectContainsAuditor checks whether sub appears as a username in the
-// project's auditors array (case-insensitive).
-func projectContainsAuditor(raw json.RawMessage, sub string) bool {
+// projectContainsAuditor checks whether username appears in the project's
+// auditors array (case-insensitive).
+func projectContainsAuditor(raw json.RawMessage, username string) bool {
 	var data query.ProjectData
 	if err := json.Unmarshal(raw, &data); err != nil {
 		return false
 	}
 	for _, a := range data.Auditors {
-		if strings.EqualFold(a.Username, sub) {
+		if strings.EqualFold(a.Username, username) {
 			return true
 		}
 	}

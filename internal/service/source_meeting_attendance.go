@@ -17,7 +17,7 @@ import (
 // records using dual-leg tag lookups (email + username). Both legs use tags_all
 // so no local post-filter is needed. De-duplicates by Resource.id and returns
 // meeting_attendance detections with project info from the enriched record.
-func (h *personaHandler) sourceMeetingAttendance(ctx context.Context, req *model.PersonaRequest, sub string) ([]model.Project, error) {
+func (h *personaHandler) sourceMeetingAttendance(ctx context.Context, req *model.PersonaRequest) ([]model.Project, error) {
 	type legResult struct {
 		resources []query.Resource
 		err       error
@@ -38,15 +38,15 @@ func (h *personaHandler) sourceMeetingAttendance(ctx context.Context, req *model
 		emailCh <- legResult{resources, err}
 	}()
 
-	// Username leg — skipped when sub is empty. Both email and username are
+	// Username leg — skipped when username is empty. Both email and username are
 	// indexed as tags on these records, so tags_all is used for both legs.
-	if sub != "" {
+	if req.Username != "" {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			resources, err := h.queryClient.Search(ctx, query.SearchParams{
 				Type:    "v1_past_meeting_participant",
-				TagsAll: []string{"username:" + sub},
+				TagsAll: []string{"username:" + req.Username},
 			})
 			usernameCh <- legResult{resources, err}
 		}()
