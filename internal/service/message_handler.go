@@ -66,7 +66,9 @@ func (h *personaHandler) GetPersona(ctx context.Context, msg port.TransportMesse
 		"email", req.Email,
 	)
 
-	// Resolve username → Auth0 sub once (shared by Query Service sources).
+	// Resolve username → Auth0 sub for Query Service sources still indexed
+	// with Auth0 subs (project settings, mailing lists, meeting attendance).
+	// Committee member lookups use the LFX username directly.
 	var sub string
 	if h.queryClient != nil && req.Username != "" {
 		var subErr error
@@ -91,7 +93,7 @@ func (h *personaHandler) GetPersona(ctx context.Context, msg port.TransportMesse
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			p, err := h.sourceBoardMemberAndCommittee(ctx, &req, sub)
+			p, err := h.sourceBoardMemberAndCommittee(ctx, &req)
 			results <- sourceResult{p, err, "board_member+committee"}
 		}()
 	}
