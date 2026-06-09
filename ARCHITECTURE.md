@@ -526,6 +526,8 @@ the liberal-match concern does not apply:
 2. **Username leg** (skipped when username is empty) —
    `tags_all=username:<username>` with
    `object_type:v1_past_meeting_participant`.
+   Note: `username` on these records stores the caller's bare LFX username
+   (populated by the committee-service reindex, LFXV2-2167).
 
 Results from both legs are de-duplicated by `Resource.id`.
 

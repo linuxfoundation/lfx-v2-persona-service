@@ -59,6 +59,9 @@ func (h *personaHandler) GetPersona(ctx context.Context, msg port.TransportMesse
 	if req.Email == "" {
 		return errorResponse("validation_error", "email is required")
 	}
+	if !isValidQueryUsername(req.Username) {
+		return errorResponse("validation_error", "username contains invalid characters")
+	}
 
 	slog.DebugContext(ctx, "persona request received",
 		"username", req.Username,
