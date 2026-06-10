@@ -6,7 +6,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -60,21 +59,14 @@ func (h *personaHandler) GetPersona(ctx context.Context, msg port.TransportMesse
 	if req.Email == "" {
 		return errorResponse("validation_error", "email is required")
 	}
+	if !isValidQueryUsername(req.Username) {
+		return errorResponse("validation_error", "username contains invalid characters")
+	}
 
 	slog.DebugContext(ctx, "persona request received",
 		"username", req.Username,
 		"email", req.Email,
 	)
-
-	// Resolve username → Auth0 sub once (shared by Query Service sources).
-	var sub string
-	if h.queryClient != nil && req.Username != "" {
-		var subErr error
-		sub, subErr = h.resolveUsernameToSub(ctx, req.Username)
-		if subErr != nil {
-			slog.WarnContext(ctx, "username→sub resolution failed", "error", subErr)
-		}
-	}
 
 	// Fan out to enabled sources in parallel.
 	type sourceResult struct {
@@ -91,7 +83,7 @@ func (h *personaHandler) GetPersona(ctx context.Context, msg port.TransportMesse
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			p, err := h.sourceBoardMemberAndCommittee(ctx, &req, sub)
+			p, err := h.sourceBoardMemberAndCommittee(ctx, &req)
 			results <- sourceResult{p, err, "board_member+committee"}
 		}()
 	}
@@ -101,7 +93,7 @@ func (h *personaHandler) GetPersona(ctx context.Context, msg port.TransportMesse
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			p, err := h.sourceExecutiveDirector(ctx, &req, sub)
+			p, err := h.sourceExecutiveDirector(ctx, &req)
 			results <- sourceResult{p, err, "executive_director"}
 		}()
 	}
@@ -111,7 +103,7 @@ func (h *personaHandler) GetPersona(ctx context.Context, msg port.TransportMesse
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			p, err := h.sourceWriterAuditor(ctx, &req, sub)
+			p, err := h.sourceWriterAuditor(ctx, &req)
 			results <- sourceResult{p, err, "writer+auditor"}
 		}()
 	}
@@ -121,7 +113,7 @@ func (h *personaHandler) GetPersona(ctx context.Context, msg port.TransportMesse
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			p, err := h.sourceMailingList(ctx, &req, sub)
+			p, err := h.sourceMailingList(ctx, &req)
 			results <- sourceResult{p, err, "mailing_list"}
 		}()
 	}
@@ -131,7 +123,7 @@ func (h *personaHandler) GetPersona(ctx context.Context, msg port.TransportMesse
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			p, err := h.sourceMeetingAttendance(ctx, &req, sub)
+			p, err := h.sourceMeetingAttendance(ctx, &req)
 			results <- sourceResult{p, err, "meeting_attendance"}
 		}()
 	}
@@ -358,38 +350,6 @@ func (h *personaHandler) backgroundRefreshAffiliations(memberID string) {
 		return
 	}
 	h.cdpCache.PutAffiliations(ctx, memberID, affiliations)
-}
-
-const authServiceUsernameToSub = "lfx.auth-service.username_to_sub"
-
-// resolveUsernameToSub calls the auth service via NATS to translate an LFX
-// username into an Auth0 sub (e.g. "auth0|abc123"). Returns empty string if
-// the user is not found.
-func (h *personaHandler) resolveUsernameToSub(ctx context.Context, username string) (string, error) {
-	if h.natsClient == nil {
-		return "", fmt.Errorf("NATS client not available for username→sub lookup")
-	}
-
-	resp, err := h.natsClient.Request(ctx, authServiceUsernameToSub, []byte(username))
-	if err != nil {
-		return "", fmt.Errorf("auth service username_to_sub: %w", err)
-	}
-
-	// On error the auth service returns JSON like {"success":false,"error":"..."}
-	if len(resp) > 0 && resp[0] == '{' {
-		slog.WarnContext(ctx, "username→sub lookup returned error response",
-			"username", username,
-			"response", string(resp),
-		)
-		return "", nil
-	}
-
-	sub := strings.TrimSpace(string(resp))
-	slog.DebugContext(ctx, "resolved username to sub",
-		"username", username,
-		"sub", sub,
-	)
-	return sub, nil
 }
 
 // errorResponse builds a PersonaResponse with an error and empty projects.

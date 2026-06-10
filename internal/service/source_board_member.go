@@ -17,9 +17,7 @@ import (
 // sourceBoardMemberAndCommittee runs two parallel branches:
 //  1. Board-only committee_member query → board_member detections
 //  2. All committee_member query (no category filter) → committee_member detections (Source 4)
-//
-// Both share the same username→sub resolution.
-func (h *personaHandler) sourceBoardMemberAndCommittee(ctx context.Context, req *model.PersonaRequest, sub string) ([]model.Project, error) {
+func (h *personaHandler) sourceBoardMemberAndCommittee(ctx context.Context, req *model.PersonaRequest) ([]model.Project, error) {
 	// Run Board-only and All-committee queries in parallel.
 	type branchResult struct {
 		resources []query.Resource
@@ -33,12 +31,12 @@ func (h *personaHandler) sourceBoardMemberAndCommittee(ctx context.Context, req 
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		r, err := h.queryCommitteeMembers(ctx, req, sub, true)
+		r, err := h.queryCommitteeMembers(ctx, req, true)
 		boardCh <- branchResult{r, err}
 	}()
 	go func() {
 		defer wg.Done()
-		r, err := h.queryCommitteeMembers(ctx, req, sub, false)
+		r, err := h.queryCommitteeMembers(ctx, req, false)
 		allCh <- branchResult{r, err}
 	}()
 
@@ -78,7 +76,7 @@ func (h *personaHandler) sourceBoardMemberAndCommittee(ctx context.Context, req 
 // queryCommitteeMembers runs the dual-leg (email + username) query for
 // committee_member resources. When boardOnly is true, the query is filtered
 // to committee_category:Board; otherwise all categories are included.
-func (h *personaHandler) queryCommitteeMembers(ctx context.Context, req *model.PersonaRequest, sub string, boardOnly bool) ([]query.Resource, error) {
+func (h *personaHandler) queryCommitteeMembers(ctx context.Context, req *model.PersonaRequest, boardOnly bool) ([]query.Resource, error) {
 	type legResult struct {
 		resources []query.Resource
 		err       error
@@ -105,12 +103,8 @@ func (h *personaHandler) queryCommitteeMembers(ctx context.Context, req *model.P
 		emailCh <- legResult{resources, err}
 	}()
 
-	// Username leg — skipped when sub is empty.
-	// NOTE: The Query Service committee_member "username" field contains the
-	// Auth0 sub (e.g. "auth0|abc123"), not the LFX username. The sub is
-	// resolved once by the caller. This indirection can be removed once the
-	// Query Service indexes the actual username.
-	if sub != "" {
+	// Username leg — skipped when username is empty.
+	if req.Username != "" {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -120,7 +114,7 @@ func (h *personaHandler) queryCommitteeMembers(ctx context.Context, req *model.P
 			}
 			params := query.SearchParams{
 				Type:    "committee_member",
-				Filters: []string{"username:" + sub},
+				Filters: []string{"username:" + req.Username},
 			}
 			if len(usernameTags) > 0 {
 				params.TagsAll = usernameTags
@@ -173,7 +167,7 @@ func (h *personaHandler) queryCommitteeMembers(ctx context.Context, req *model.P
 		if err := json.Unmarshal(r.Data, &data); err != nil {
 			continue
 		}
-		if !strings.EqualFold(data.Username, sub) {
+		if !strings.EqualFold(data.Username, req.Username) {
 			continue
 		}
 		seen[r.ID] = true

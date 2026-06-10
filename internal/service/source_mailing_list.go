@@ -18,7 +18,7 @@ import (
 // using the dual-leg (email + username) pattern, de-duplicates by Resource.id,
 // and returns mailing_list detections with project info read directly from
 // the enriched record.
-func (h *personaHandler) sourceMailingList(ctx context.Context, req *model.PersonaRequest, sub string) ([]model.Project, error) {
+func (h *personaHandler) sourceMailingList(ctx context.Context, req *model.PersonaRequest) ([]model.Project, error) {
 	type legResult struct {
 		resources []query.Resource
 		err       error
@@ -39,14 +39,14 @@ func (h *personaHandler) sourceMailingList(ctx context.Context, req *model.Perso
 		emailCh <- legResult{resources, err}
 	}()
 
-	// Username leg — skipped when sub is empty.
-	if sub != "" {
+	// Username leg — skipped when username is empty.
+	if req.Username != "" {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			resources, err := h.queryClient.Search(ctx, query.SearchParams{
 				Type:    "groupsio_member",
-				Filters: []string{"username:" + sub},
+				Filters: []string{"username:" + req.Username},
 			})
 			usernameCh <- legResult{resources, err}
 		}()
@@ -89,7 +89,7 @@ func (h *personaHandler) sourceMailingList(ctx context.Context, req *model.Perso
 		if err := json.Unmarshal(r.Data, &data); err != nil {
 			continue
 		}
-		if !strings.EqualFold(data.Username, sub) {
+		if !strings.EqualFold(data.Username, req.Username) {
 			continue
 		}
 		seen[r.ID] = true

@@ -14,17 +14,17 @@ import (
 )
 
 // sourceExecutiveDirector queries the Query Service for project_settings
-// resources where data.executive_director.username matches the user's Auth0
-// sub, applies a local exact post-filter, resolves the project slug, and
+// resources where data.executive_director.username matches the caller's LFX
+// username, applies a local exact post-filter, resolves the project slug, and
 // returns executive_director detections (no extra).
-func (h *personaHandler) sourceExecutiveDirector(ctx context.Context, req *model.PersonaRequest, sub string) ([]model.Project, error) {
-	if sub == "" {
+func (h *personaHandler) sourceExecutiveDirector(ctx context.Context, req *model.PersonaRequest) ([]model.Project, error) {
+	if req.Username == "" {
 		return nil, nil
 	}
 
 	resources, err := h.queryClient.Search(ctx, query.SearchParams{
 		Type:    "project_settings",
-		Filters: []string{"executive_director.username:" + sub},
+		Filters: []string{"executive_director.username:" + req.Username},
 	})
 	if err != nil {
 		return nil, err
@@ -39,7 +39,7 @@ func (h *personaHandler) sourceExecutiveDirector(ctx context.Context, req *model
 			continue
 		}
 		// Local post-filter: exact match on the nested username field.
-		if !strings.EqualFold(data.ExecutiveDirector.Username, sub) {
+		if !strings.EqualFold(data.ExecutiveDirector.Username, req.Username) {
 			continue
 		}
 
