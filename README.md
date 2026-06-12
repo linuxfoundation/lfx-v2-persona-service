@@ -321,15 +321,10 @@ export NATS_URL=nats://localhost:4222
 export QUERY_SERVICE_URL=http://localhost:8081   # or use LFX_BASE_URL + LFX_AUDIENCE
 
 make run
+make debug  # alternative: same as make run with -d
 ```
 
 The server listens on `:8080` for health checks and subscribes to `lfx.personas-api.get` on NATS.
-
-For debug logging:
-
-```bash
-./bin/lfx-v2-persona-service -d
-```
 
 ### Make targets
 
@@ -340,6 +335,7 @@ For debug logging:
 | `make apigen` | Regenerate Goa HTTP/health code from `cmd/server/design/` |
 | `make build` | Build binary to `bin/lfx-v2-persona-service` |
 | `make run` | Build and run |
+| `make debug` | Build and run with debug logging (`-d`) |
 | `make test` | Run tests with race detector and coverage |
 | `make lint` | Run golangci-lint |
 | `make fmt` | Format Go source |
