@@ -1,8 +1,8 @@
 # LFX v2 Persona Service
 
-The Persona Service is a microservice in the LFX V2 platform. It aggregates a user's involvement across Linux Foundation projects and foundations into a single, UI-friendly response.
+The Persona Service is a microservice in the [LFX Self-Service](https://github.com/linuxfoundation/lfx-self-serve) platform (also known as LFX v2). It aggregates a user's involvement across Linux Foundation projects and foundations into a single, UI-friendly response.
 
-The primary consumer is the [LFX Self Serve UI](https://github.com/linuxfoundation/lfx-self-serve). The service answers the question: *"Which projects is this user connected to, and through what kinds of engagement?"* — so the UI can personalize navigation, landing views, and feature surfacing without making many parallel upstream calls on every page load.
+The primary consumer is the LFX Self-Service UI. The service answers the question: *"Which projects is this user connected to, and through what kinds of engagement?"* — so the UI can personalize navigation, landing views, and feature surfacing without making many parallel upstream calls on every page load.
 
 ## What this is (and is not)
 
@@ -23,9 +23,9 @@ A user may have **multiple personas** across different projects and foundations.
 | Subject | `lfx.personas-api.get` |
 | Queue group | `lfx.personas-api.queue` |
 | Pattern | Request/reply (caller publishes a request; service replies on the inbox) |
-| Recommended timeout | 5 seconds |
+| Recommended timeout | 5 seconds (caller-side; not enforced server-side) |
 
-The service fans out to all enabled data sources in parallel. Partial failures from individual sources are logged and skipped; the response still includes results from sources that succeeded. Hard failures (malformed request, validation error) return a top-level `error` field with an empty `projects` array.
+The service fans out to all enabled data sources in parallel. Upstream HTTP clients use a 10-second timeout per request. Partial failures from individual sources are logged and skipped; the response still includes results from sources that succeeded. Hard failures (malformed request, validation error) return a top-level `error` field with an empty `projects` array.
 
 ### Request
 
@@ -103,7 +103,7 @@ The service fans out to all enabled data sources in parallel. Partial failures f
 | `cdp_activity` | CDP/Snowflake activity signal *(reserved; not yet implemented)* |
 | `writer` | Project writer (access-control membership) |
 | `auditor` | Project auditor (access-control membership) |
-| `committee_member` | Member of any committee (non-Board community signal) |
+| `committee_member` | Member of any committee, including Board (community engagement signal) |
 | `mailing_list` | Subscribed to a project mailing list |
 | `meeting_attendance` | Invited to or attended a project meeting |
 
@@ -141,6 +141,8 @@ nats req lfx.personas-api.get \
 #### Go (request/reply)
 
 ```go
+// imports: "fmt", "log", "time", github.com/nats-io/nats.go
+
 nc, err := nats.Connect("nats://localhost:4222")
 if err != nil {
     log.Fatal(err)
@@ -293,6 +295,8 @@ Subscription is a navigation hint only, not a permission signal.
 | Executive Director | `executive_director` |
 | Community (default) | Any of: `cdp_roles`, `cdp_activity`, `writer`, `auditor`, `committee_member`, `mailing_list`, `meeting_attendance` |
 
+Board-category members also receive `committee_member` detections alongside `board_member`. The UI should treat `board_member` as the governance signal and not infer absence of Board membership from `committee_member` alone.
+
 A user may qualify for multiple personas on the same project. The UI chooses which view to prioritize based on product rules (typically Board Member and ED take precedence over Community).
 
 ---
@@ -354,6 +358,7 @@ lfx-v2-persona-service/
 │   │   ├── query/           Query Service HTTP client
 │   │   └── nats/            NATS connection, subscriptions, KV store
 │   └── domain/              Models and port interfaces
+├── pkg/                     Shared logging, errors, and constants
 ├── gen/                     Generated Goa code (do not edit by hand)
 └── charts/                  Helm chart for Kubernetes deployment
 ```
