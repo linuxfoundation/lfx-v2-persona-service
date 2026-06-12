@@ -141,7 +141,10 @@ nats req lfx.personas-api.get \
 #### Go (request/reply)
 
 ```go
-nc, _ := nats.Connect("nats://localhost:4222")
+nc, err := nats.Connect("nats://localhost:4222")
+if err != nil {
+    log.Fatal(err)
+}
 defer nc.Close()
 
 req := []byte(`{"username":"jdoe","email":"jdoe@example.com"}`)
@@ -341,15 +344,18 @@ For debug logging:
 ### Project layout
 
 ```
-cmd/server/          Entry point, Goa design, HTTP server, NATS wiring
-internal/service/    Persona handler and per-source query logic
-internal/infrastructure/
-  cdp/               CDP API client, Auth0 token provider, NATS KV cache
-  query/             Query Service HTTP client
-  nats/              NATS connection, subscriptions, KV store
-internal/domain/     Models and port interfaces
-gen/                 Generated Goa code (do not edit by hand)
-charts/              Helm chart for Kubernetes deployment
+lfx-v2-persona-service/
+├── cmd/
+│   └── server/              Entry point, Goa design, HTTP server, NATS wiring
+├── internal/
+│   ├── service/             Persona handler and per-source query logic
+│   ├── infrastructure/
+│   │   ├── cdp/             CDP API client, Auth0 token provider, NATS KV cache
+│   │   ├── query/           Query Service HTTP client
+│   │   └── nats/            NATS connection, subscriptions, KV store
+│   └── domain/              Models and port interfaces
+├── gen/                     Generated Goa code (do not edit by hand)
+└── charts/                  Helm chart for Kubernetes deployment
 ```
 
 After changing the Goa design in `cmd/server/design/persona.go`, run `make apigen`.
@@ -378,7 +384,7 @@ This enables Board Member, Executive Director, writer/auditor, committee member,
 | `AUTH0_M2M_PRIVATE_BASE64_KEY` | CDP / gateway | Base64 RSA private key for client assertion JWT |
 | `CDP_AUDIENCE` | CDP | Auth0 audience for CDP API |
 | `CDP_BASE_URL` | CDP | CDP API base URL |
-| `NATS_TIMEOUT` | No | NATS request timeout (default `10s`) |
+| `NATS_TIMEOUT` | No | NATS connection timeout for dial/connect, passed to `nats.Timeout()` (default `10s`). Does not control caller request/reply timeouts. |
 | `NATS_MAX_RECONNECT` | No | Max reconnect attempts (default `3`) |
 | `NATS_RECONNECT_WAIT` | No | Wait between reconnects (default `2s`) |
 
