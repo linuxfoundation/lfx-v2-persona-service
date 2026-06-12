@@ -230,7 +230,7 @@ Snowflake-backed activity aggregation for projects where the user has recorded c
 
 1. **Resolve** the CDP member ID: `POST /v1/members/resolve` with `{ "lfids": [username], "emails": [email] }`. A 404 means no CDP profile — this source returns empty.
 2. **Fetch affiliations:** `GET /v1/members/{memberId}/project-affiliations`.
-3. **Cache** both steps in the NATS KV bucket `persona-cache` (24h TTL, stale-while-revalidate after 10 minutes).
+3. **Cache** both steps in the NATS KV bucket `persona-cache` (bucket TTL is configured at deploy time; stale-while-revalidate after 10 minutes in application code).
 4. **Resolve slugs to v2 UIDs** via project service NATS endpoint `lfx.projects-api.slug_to_uid` (parallel per slug).
 5. Skip `nonlf_*` slugs and affiliations that fail UID resolution.
 6. Emit `cdp_roles` with `extra.contributionCount` and `extra.roles[]` passed through from CDP.
@@ -380,7 +380,7 @@ This enables Board Member, Executive Director, writer/auditor, committee member,
 
 | Variable | Required | Notes |
 |----------|----------|-------|
-| `NATS_URL` | Yes | NATS server URL. Default: `nats://localhost:4222` |
+| `NATS_URL` | No | NATS server URL. Defaults to `nats://localhost:4222` when unset; the service starts without requiring this to be explicitly set. |
 | `QUERY_SERVICE_URL` | One of* | Direct Query Service base URL (no auth) |
 | `LFX_BASE_URL` | One of* | LFX API gateway URL (requires Auth0 + `LFX_AUDIENCE`) |
 | `LFX_AUDIENCE` | With gateway | Auth0 audience for gateway access |
@@ -399,15 +399,17 @@ This enables Board Member, Executive Director, writer/auditor, committee member,
 
 ### Caching
 
-| Data | Backend | TTL |
-|------|---------|-----|
-| CDP `memberId` | NATS KV (`persona-cache`) | 24 hours |
-| CDP affiliations | NATS KV (`persona-cache`) | 24 hours |
+The service does not create the `persona-cache` JetStream KV bucket — it connects to an existing bucket via `js.KeyValue()`. In Kubernetes deployments the Helm chart creates the bucket with a 24-hour entry TTL (`charts/lfx-v2-persona-service/values.yaml`). The application writes values with `PutString` and does not set per-entry TTL itself.
+
+| Data | Backend | Expiry |
+|------|---------|--------|
+| CDP `memberId` | NATS KV (`persona-cache`) | Bucket TTL (24h when deployed via Helm) |
+| CDP affiliations | NATS KV (`persona-cache`) | Bucket TTL (24h when deployed via Helm) |
 | Auth0 M2M token | In-process | Expiry − 5 min |
 
 Query Service lookups are **not** cached.
 
-Stale-while-revalidate: entries younger than 10 minutes are served as-is; older entries are returned immediately while a background refresh runs.
+Stale-while-revalidate (application-level): entries younger than 10 minutes are served as-is; older entries are returned immediately while a background refresh runs. This 10-minute threshold is independent of the bucket TTL.
 
 ### Testing
 
