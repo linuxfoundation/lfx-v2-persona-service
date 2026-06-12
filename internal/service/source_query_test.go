@@ -76,9 +76,9 @@ type staticMessenger struct {
 	data []byte
 }
 
-func (m *staticMessenger) Subject() string       { return "lfx.personas-api.get" }
-func (m *staticMessenger) Data() []byte          { return m.data }
-func (m *staticMessenger) Respond([]byte) error  { return nil }
+func (m *staticMessenger) Subject() string      { return "lfx.personas-api.get" }
+func (m *staticMessenger) Data() []byte         { return m.data }
+func (m *staticMessenger) Respond([]byte) error { return nil }
 
 func TestSourceExecutiveDirector_emptyUsernameShortCircuits(t *testing.T) {
 	capture := newQueryRequestCapture(nil)

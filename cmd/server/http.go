@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	personaservice "github.com/linuxfoundation/lfx-v2-persona-service/gen/persona_service"
 	personaserver "github.com/linuxfoundation/lfx-v2-persona-service/gen/http/persona_service/server"
+	personaservice "github.com/linuxfoundation/lfx-v2-persona-service/gen/persona_service"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"goa.design/clue/debug"
