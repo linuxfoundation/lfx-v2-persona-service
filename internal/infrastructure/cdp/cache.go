@@ -18,7 +18,7 @@ const (
 	freshThreshold = 10 * time.Minute
 
 	// Key prefixes for the persona-cache KV bucket.
-	memberIDKeyPrefix    = "cdp.member_id."
+	memberIDKeyPrefix     = "cdp.member_id."
 	affiliationsKeyPrefix = "cdp.affiliations."
 )
 

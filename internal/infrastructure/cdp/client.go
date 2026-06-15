@@ -84,7 +84,7 @@ func (c *Client) ResolveMember(ctx context.Context, username, email string) (str
 	if err != nil {
 		return "", fmt.Errorf("resolve request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -143,7 +143,7 @@ func (c *Client) GetProjectAffiliations(ctx context.Context, memberID string) ([
 	if err != nil {
 		return nil, fmt.Errorf("affiliations request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

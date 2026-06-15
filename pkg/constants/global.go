@@ -28,4 +28,3 @@ const (
 	CDPAudienceEnvKey              = "CDP_AUDIENCE"
 	CDPBaseURLEnvKey               = "CDP_BASE_URL"
 )
-

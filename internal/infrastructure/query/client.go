@@ -97,7 +97,7 @@ func (c *Client) Search(ctx context.Context, params SearchParams) ([]Resource, e
 	if err != nil {
 		return nil, fmt.Errorf("query request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

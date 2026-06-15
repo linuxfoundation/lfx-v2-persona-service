@@ -52,11 +52,11 @@ const (
 
 // BoardMemberExtra is the extra payload for a board_member detection.
 type BoardMemberExtra struct {
-	CommitteeUID       string                 `json:"committee_uid"`
-	CommitteeName      string                 `json:"committee_name"`
-	CommitteeMemberUID string                 `json:"committee_member_uid"`
-	Role               string                 `json:"role"`
-	VotingStatus       string                 `json:"voting_status"`
+	CommitteeUID       string                  `json:"committee_uid"`
+	CommitteeName      string                  `json:"committee_name"`
+	CommitteeMemberUID string                  `json:"committee_member_uid"`
+	Role               string                  `json:"role"`
+	VotingStatus       string                  `json:"voting_status"`
 	Organization       BoardMemberOrganization `json:"organization"`
 }
 
@@ -78,8 +78,8 @@ type CommitteeMemberExtra struct {
 // CDPRolesExtra is the extra payload for a cdp_roles detection.
 // Roles are passed through as-is from CDP; the UI interprets them.
 type CDPRolesExtra struct {
-	ContributionCount int                    `json:"contributionCount"`
-	Roles             []CDPRolesExtraRole    `json:"roles"`
+	ContributionCount int                 `json:"contributionCount"`
+	Roles             []CDPRolesExtraRole `json:"roles"`
 }
 
 // CDPRolesExtraRole mirrors the role shape from the CDP project-affiliations response.

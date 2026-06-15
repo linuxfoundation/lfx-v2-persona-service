@@ -21,15 +21,15 @@ type Resource struct {
 
 // CommitteeMemberData represents the data fields on a committee_member resource.
 type CommitteeMemberData struct {
-	Username      string                    `json:"username"`
-	Email         string                    `json:"email"`
-	CommitteeUID  string                    `json:"committee_uid"`
-	CommitteeName string                    `json:"committee_name"`
-	ProjectUID    string                    `json:"project_uid"`
-	ProjectSlug   string                    `json:"project_slug"`
-	Role          CommitteeMemberRole       `json:"role"`
-	Voting        CommitteeMemberVote       `json:"voting"`
-	Organization  CommitteeMemberOrg        `json:"organization"`
+	Username      string              `json:"username"`
+	Email         string              `json:"email"`
+	CommitteeUID  string              `json:"committee_uid"`
+	CommitteeName string              `json:"committee_name"`
+	ProjectUID    string              `json:"project_uid"`
+	ProjectSlug   string              `json:"project_slug"`
+	Role          CommitteeMemberRole `json:"role"`
+	Voting        CommitteeMemberVote `json:"voting"`
+	Organization  CommitteeMemberOrg  `json:"organization"`
 }
 
 // CommitteeMemberOrg is the nested organization object on a committee_member.
@@ -48,7 +48,6 @@ type CommitteeMemberRole struct {
 type CommitteeMemberVote struct {
 	Status string `json:"status"`
 }
-
 
 // ProjectData represents the data fields on a project_settings resource.
 type ProjectData struct {

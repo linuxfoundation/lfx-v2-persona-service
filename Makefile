@@ -12,7 +12,7 @@ DOCKER_IMAGE := $(DOCKER_REGISTRY)/$(APP_NAME)
 DOCKER_TAG := $(VERSION)
 
 # Go
-GO_VERSION := 1.24.5
+GO_VERSION := 1.25.0
 GOOS := linux
 GOARCH := amd64
 
@@ -110,6 +110,11 @@ build: apigen ## Build the application for local OS
 run: build ## Run the application for local development
 	@echo "Running application for local development..."
 	./bin/$(APP_NAME)
+
+.PHONY: debug
+debug: build ## Run the application with debug logging enabled
+	@echo "Running application with debug logging..."
+	./bin/$(APP_NAME) -d
 
 ##@ Docker
 
