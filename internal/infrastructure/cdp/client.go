@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // Client provides access to the CDP API (resolve + project-affiliations).
@@ -34,7 +35,17 @@ type ClientConfig struct {
 func NewClient(cfg ClientConfig) *Client {
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 10 * time.Second}
+		httpClient = &http.Client{Timeout: 10 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}
+	} else {
+		cloned := *httpClient
+		underlying := cloned.Transport
+		if underlying == nil {
+			underlying = http.DefaultTransport
+		}
+		if _, ok := underlying.(*otelhttp.Transport); !ok {
+			cloned.Transport = otelhttp.NewTransport(underlying)
+			httpClient = &cloned
+		}
 	}
 	return &Client{
 		baseURL:    strings.TrimRight(cfg.BaseURL, "/"),
