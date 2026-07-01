@@ -129,7 +129,15 @@ app:
     endpoint: ""
     insecure: "false"
     tracesExporter: "none"
-    tracesSampleRatio: "1.0"
+    # tracesSampler specifies the OTEL_TRACES_SAMPLER type. Supported values:
+    # "always_on", "always_off", "traceidratio", "parentbased_always_on",
+    # "parentbased_always_off", "parentbased_traceidratio".
+    # When empty, the application defaults to parentbased_traceidratio.
+    tracesSampler: ""
+    # tracesSamplerArg specifies the OTEL_TRACES_SAMPLER_ARG (sampler ratio or parent_sampler_arg).
+    # Required for "traceidratio" and "parentbased_traceidratio" samplers.
+    # (default: "")
+    tracesSamplerArg: ""
     metricsExporter: "none"
     logsExporter: "none"
     propagators: "tracecontext,baggage,jaeger"
