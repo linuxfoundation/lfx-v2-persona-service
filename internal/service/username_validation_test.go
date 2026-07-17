@@ -22,11 +22,15 @@ func TestIsValidQueryUsername(t *testing.T) {
 		{username: "", want: true},
 		{username: "alice-lfid", want: true},
 		{username: "user_123", want: true},
+		{username: "alice.lfid", want: true},
+		{username: "first.last", want: true},
+		{username: "a.b.c", want: true},
 		{username: "foo,bar", want: false},
 		{username: "foo:bar", want: false},
 		{username: "foo*bar", want: false},
 		{username: `foo"bar`, want: false},
 		{username: "auth0|alice", want: false},
+		{username: "foo,bar.baz", want: false},
 	}
 
 	for _, tt := range tests {

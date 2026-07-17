@@ -38,7 +38,7 @@ The service fans out to all enabled data sources in parallel. Upstream HTTP clie
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `username` | No* | Auth0 `nickname` / LFX username. May be empty for accounts without a username yet. Sources that match on username are skipped when empty. Must contain only `[a-zA-Z0-9_-]` when provided. |
+| `username` | No* | Auth0 `nickname` / LFX username. May be empty for accounts without a username yet. Sources that match on username are skipped when empty. Must contain only `[a-zA-Z0-9._-]` when provided. |
 | `email` | Yes | Primary email, normalized to lowercase. Used as the primary identity signal for email-based lookups. |
 
 \* `email` is strictly required; `username` is optional but unlocks additional matching legs.
