@@ -4,6 +4,9 @@
 # replicaCount is the number of replicas for the deployment (overridden via Argo for dev/staging/prod)
 replicaCount: 1
 
+# annotations are additional annotations applied to the Deployment itself.
+annotations: {}
+
 # podAnnotations are additional annotations applied to the pod template.
 podAnnotations: {}
 
