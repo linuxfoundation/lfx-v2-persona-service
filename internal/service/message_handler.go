@@ -192,10 +192,24 @@ collecting:
 			}
 			projects = model.MergeProjects(projects, r.projects)
 		case <-ctx.Done():
-			// If the handler deadline fired, tell the caller explicitly so it
-			// can distinguish a timed-out response from a genuine "no
-			// affiliations" result. Partial results collected before the
-			// deadline are included per the ARCHITECTURE.md timeout contract.
+			// Drain any results already buffered in the channel — goroutines that
+			// finished just before the deadline may have queued their results
+			// without getting a turn in the select loop yet.
+			for {
+				select {
+				case r, ok := <-results:
+					if !ok || r.err != nil {
+						goto done
+					}
+					projects = model.MergeProjects(projects, r.projects)
+				default:
+					goto done
+				}
+			}
+		done:
+			// Tell the caller explicitly so it can distinguish a timed-out
+			// response from a genuine "no affiliations" result. Partial results
+			// are included per the ARCHITECTURE.md timeout contract.
 			slog.WarnContext(ctx, "persona handler timed out — returning partial results as error",
 				"timeout", h.handlerTimeout,
 			)
