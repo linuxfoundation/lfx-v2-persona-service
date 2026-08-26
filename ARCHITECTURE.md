@@ -175,7 +175,7 @@ A single project entry may carry multiple detections with the same `source` toke
 
 #### `error`
 
-`null` on success. On a hard failure (e.g. upstream NATS timeout, unrecoverable internal error) the response carries a non-null error object and `projects` is empty:
+`null` on success. On a hard failure (e.g. upstream NATS timeout, unrecoverable internal error) the response carries a non-null error object:
 
 ```json
 {
@@ -186,6 +186,20 @@ A single project entry may carry multiple detections with the same `source` toke
   }
 }
 ```
+
+When the handler's own deadline fires before all sources have responded (`handler_timeout`), any projects collected from sources that finished in time are **included** alongside the error — `projects` may be non-empty:
+
+```json
+{
+  "projects": [{ "project_uid": "...", "detections": [...] }],
+  "error": {
+    "code": "handler_timeout",
+    "message": "persona detection timed out; upstream sources did not respond in time"
+  }
+}
+```
+
+Callers must check `error.code` rather than assuming `projects` is empty whenever `error` is non-null.
 
 Partial failures (e.g. CDP returning 404, one Query Service leg timing out) are treated as empty results for the affected source — they do not surface as top-level errors. The service returns whatever it was able to collect.
 
