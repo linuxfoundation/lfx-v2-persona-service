@@ -388,6 +388,7 @@ This enables Board Member, Executive Director, writer/auditor, committee member,
 | `NATS_TIMEOUT` | No | NATS connection timeout for dial/connect, passed to `nats.Timeout()` (default `10s`). Does not control caller request/reply timeouts. |
 | `NATS_MAX_RECONNECT` | No | Max reconnect attempts (default `3`) |
 | `NATS_RECONNECT_WAIT` | No | Wait between reconnects (default `2s`) |
+| `PERSONA_HANDLER_TIMEOUT` | No | Caps total wall time `GetPersona` waits for all sources before responding (default `4s`). Must stay below the caller's NATS reply timeout (lfx-self-serve uses `5s`). |
 
 \* Either `QUERY_SERVICE_URL` or `LFX_BASE_URL` (+ `LFX_AUDIENCE` and Auth0 credentials) must be set for Query Service sources to activate.
 

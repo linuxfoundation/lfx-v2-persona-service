@@ -624,6 +624,7 @@ All configuration is injected via environment variables. Variable names below fo
 | `QUERY_SERVICE_URL` | see notes | Base URL of the Query Service for direct access (e.g. `http://query-service`). Either this or `LFX_BASE_URL` must be set. |
 | `LFX_BASE_URL` | see notes | Base URL of the LFX API gateway (e.g. `https://api-gw.platform.linuxfoundation.org`). Used when `QUERY_SERVICE_URL` is not set; requires Auth0 credentials and `LFX_AUDIENCE`. |
 | `LFX_AUDIENCE` | with `LFX_BASE_URL` | Auth0 audience string for the LFX API gateway. Required when using `LFX_BASE_URL`. |
+| `PERSONA_HANDLER_TIMEOUT` | no | Caps total wall time `GetPersona` waits for all sources before responding (default `4s`). Must stay below the caller's NATS reply timeout (lfx-self-serve uses `5s`). |
 
 ### Autodegradation
 
