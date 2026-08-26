@@ -24,6 +24,10 @@ import (
 // tokenExpiryBuffer is subtracted from the token expiry so we refresh early.
 const tokenExpiryBuffer = 5 * time.Minute
 
+// tokenFetchTimeout caps how long a single Auth0 token exchange may take.
+// This bounds background goroutines left running after a handler deadline fires.
+const tokenFetchTimeout = 30 * time.Second
+
 // TokenProvider manages Auth0 M2M access tokens using private key JWT
 // (client assertion). Tokens are cached in-process via oauth2.ReuseTokenSource
 // with a 5-minute early-expiry buffer.
@@ -104,7 +108,9 @@ func (s *assertionTokenSource) Token() (*oauth2.Token, error) {
 		},
 	}
 
-	tok, err := cfg.Token(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), tokenFetchTimeout)
+	defer cancel()
+	tok, err := cfg.Token(ctx)
 	if err != nil {
 		slog.Error("Auth0 token request failed", "error", err, "audience", s.audience)
 		return nil, err
