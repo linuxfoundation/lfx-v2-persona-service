@@ -198,10 +198,12 @@ collecting:
 			for {
 				select {
 				case r, ok := <-results:
-					if !ok || r.err != nil {
+					if !ok {
 						goto done
 					}
-					projects = model.MergeProjects(projects, r.projects)
+					if r.err == nil {
+						projects = model.MergeProjects(projects, r.projects)
+					}
 				default:
 					goto done
 				}
