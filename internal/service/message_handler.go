@@ -179,7 +179,7 @@ collecting:
 					slog.WarnContext(ctx, "persona handler timed out — returning partial results as error",
 						"timeout", h.handlerTimeout,
 					)
-					return errorResponse("handler_timeout", "persona detection timed out; upstream sources did not respond in time")
+					return timeoutResponse(projects)
 				}
 				break collecting
 			}
@@ -194,11 +194,12 @@ collecting:
 		case <-ctx.Done():
 			// If the handler deadline fired, tell the caller explicitly so it
 			// can distinguish a timed-out response from a genuine "no
-			// affiliations" result.
+			// affiliations" result. Partial results collected before the
+			// deadline are included per the ARCHITECTURE.md timeout contract.
 			slog.WarnContext(ctx, "persona handler timed out — returning partial results as error",
 				"timeout", h.handlerTimeout,
 			)
-			return errorResponse("handler_timeout", "persona detection timed out; upstream sources did not respond in time")
+			return timeoutResponse(projects)
 		}
 	}
 
@@ -396,6 +397,23 @@ func (h *personaHandler) backgroundRefreshAffiliations(memberID string) {
 		return
 	}
 	h.cdpCache.PutAffiliations(ctx, memberID, affiliations)
+}
+
+// timeoutResponse builds a PersonaResponse that signals a handler timeout
+// while preserving any projects collected before the deadline fired,
+// conforming to the partial-results contract in ARCHITECTURE.md.
+func timeoutResponse(projects []model.Project) ([]byte, error) {
+	if projects == nil {
+		projects = []model.Project{}
+	}
+	resp := model.PersonaResponse{
+		Projects: projects,
+		Error: &model.ErrorDetail{
+			Code:    "handler_timeout",
+			Message: "persona detection timed out; upstream sources did not respond in time",
+		},
+	}
+	return json.Marshal(resp)
 }
 
 // errorResponse builds a PersonaResponse with an error and empty projects.
