@@ -72,12 +72,29 @@ func NewTokenProvider(cfg TokenProviderConfig) (*TokenProvider, error) {
 }
 
 // Token returns a valid access token, using the cache when possible.
+// The underlying oauth2.TokenSource holds a mutex during refresh; running it
+// in a goroutine lets the caller unblock on ctx.Done() while the background
+// goroutine finishes the exchange and warms the cache for subsequent callers.
 func (tp *TokenProvider) Token(ctx context.Context) (string, error) {
-	tok, err := tp.tokenSource.Token()
-	if err != nil {
-		return "", err
+	type result struct {
+		token string
+		err   error
 	}
-	return tok.AccessToken, nil
+	ch := make(chan result, 1)
+	go func() {
+		tok, err := tp.tokenSource.Token()
+		if err != nil {
+			ch <- result{err: err}
+			return
+		}
+		ch <- result{token: tok.AccessToken}
+	}()
+	select {
+	case r := <-ch:
+		return r.token, r.err
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
 }
 
 // assertionTokenSource implements oauth2.TokenSource by signing a fresh
