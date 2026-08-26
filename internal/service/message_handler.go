@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/linuxfoundation/lfx-v2-persona-service/internal/domain/model"
 	"github.com/linuxfoundation/lfx-v2-persona-service/internal/domain/port"
@@ -19,10 +20,11 @@ import (
 
 // personaHandler implements port.MessageHandler.
 type personaHandler struct {
-	cdpClient   *cdp.Client
-	cdpCache    *cdp.Cache
-	queryClient *query.Client
-	natsClient  *natsclient.NATSClient
+	cdpClient      *cdp.Client
+	cdpCache       *cdp.Cache
+	queryClient    *query.Client
+	natsClient     *natsclient.NATSClient
+	handlerTimeout time.Duration
 }
 
 // PersonaHandlerOption configures the personaHandler.
@@ -44,8 +46,22 @@ func WithQueryService(client *query.Client, nc *natsclient.NATSClient) PersonaHa
 	}
 }
 
+// WithHandlerTimeout sets a deadline on the GetPersona fan-out. All source
+// goroutines share the deadline-bound context, so slow upstream calls are
+// cancelled rather than blocking the response past the caller's NATS timeout.
+func WithHandlerTimeout(d time.Duration) PersonaHandlerOption {
+	return func(h *personaHandler) {
+		h.handlerTimeout = d
+	}
+}
+
 // GetPersona validates the request and fans out to enabled sources.
 func (h *personaHandler) GetPersona(ctx context.Context, msg port.TransportMessenger) ([]byte, error) {
+	if h.handlerTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, h.handlerTimeout)
+		defer cancel()
+	}
 
 	var req model.PersonaRequest
 	if err := json.Unmarshal(msg.Data(), &req); err != nil {

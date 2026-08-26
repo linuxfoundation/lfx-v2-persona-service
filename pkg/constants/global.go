@@ -14,6 +14,14 @@ const (
 	QueryServiceURLEnvKey = "QUERY_SERVICE_URL"
 )
 
+// Environment variable keys for handler tuning.
+const (
+	// HandlerTimeoutEnvKey caps the total time GetPersona spends waiting for all
+	// data sources before responding. Must be shorter than the caller's NATS
+	// request timeout (lfx-self-serve uses 5s). Defaults to 4s.
+	HandlerTimeoutEnvKey = "PERSONA_HANDLER_TIMEOUT"
+)
+
 // Environment variable keys for LFX API gateway (alternative to QUERY_SERVICE_URL).
 const (
 	LFXBaseURLEnvKey  = "LFX_BASE_URL"

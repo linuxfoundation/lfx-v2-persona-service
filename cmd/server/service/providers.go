@@ -96,6 +96,7 @@ func QueueSubscriptions(ctx context.Context) error {
 
 	// Build handler options based on config.
 	var handlerOpts []service.PersonaHandlerOption
+	handlerOpts = append(handlerOpts, service.WithHandlerTimeout(appConfig.HandlerTimeout))
 
 	// Query Service client — either direct URL or via LFX API gateway.
 	queryClient, queryErr := newQueryClient(ctx)
