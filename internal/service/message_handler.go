@@ -171,6 +171,16 @@ collecting:
 		select {
 		case r, ok := <-results:
 			if !ok {
+				// Channel closed — all sources finished. But ctx.Done() and the
+				// channel-close can both be ready simultaneously, and Go's select
+				// picks randomly; check the deadline here so a timeout that fired
+				// while draining is never silently swallowed.
+				if ctx.Err() != nil {
+					slog.WarnContext(ctx, "persona handler timed out — returning partial results as error",
+						"timeout", h.handlerTimeout,
+					)
+					return errorResponse("handler_timeout", "persona detection timed out; upstream sources did not respond in time")
+				}
 				break collecting
 			}
 			if r.err != nil {
