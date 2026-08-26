@@ -160,25 +160,36 @@ func (h *personaHandler) GetPersona(ctx context.Context, msg port.TransportMesse
 		close(results)
 	}()
 
+	// Collect results, but stop as soon as the deadline fires. Using select
+	// here is necessary because some dependencies (e.g. the CDP/Auth0 token
+	// provider) use context.Background() internally and will not honour
+	// cancellation — a plain `range results` would block until every goroutine
+	// finishes regardless of the deadline.
 	var projects []model.Project
-	for r := range results {
-		if r.err != nil {
-			slog.ErrorContext(ctx, "source failed, skipping",
-				"source", r.name,
-				"error", r.err,
+collecting:
+	for {
+		select {
+		case r, ok := <-results:
+			if !ok {
+				break collecting
+			}
+			if r.err != nil {
+				slog.ErrorContext(ctx, "source failed, skipping",
+					"source", r.name,
+					"error", r.err,
+				)
+				continue
+			}
+			projects = model.MergeProjects(projects, r.projects)
+		case <-ctx.Done():
+			// If the handler deadline fired, tell the caller explicitly so it
+			// can distinguish a timed-out response from a genuine "no
+			// affiliations" result.
+			slog.WarnContext(ctx, "persona handler timed out — returning partial results as error",
+				"timeout", h.handlerTimeout,
 			)
-			continue
+			return errorResponse("handler_timeout", "persona detection timed out; upstream sources did not respond in time")
 		}
-		projects = model.MergeProjects(projects, r.projects)
-	}
-
-	// If the handler deadline fired, tell the caller explicitly so it can
-	// distinguish a timed-out response from a genuine "no affiliations" result.
-	if ctx.Err() != nil {
-		slog.WarnContext(ctx, "persona handler timed out — returning partial results as error",
-			"timeout", h.handlerTimeout,
-		)
-		return errorResponse("handler_timeout", "persona detection timed out; upstream sources did not respond in time")
 	}
 
 	resp := model.PersonaResponse{

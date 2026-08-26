@@ -87,7 +87,7 @@ func parseDurationEnv(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	d, err := time.ParseDuration(v)
-	if err != nil {
+	if err != nil || d <= 0 {
 		slog.Warn("invalid duration env var, using default", "key", key, "value", v, "default", fallback)
 		return fallback
 	}

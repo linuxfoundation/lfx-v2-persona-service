@@ -41,6 +41,18 @@ func TestParseDurationEnv(t *testing.T) {
 			fallback: 4 * time.Second,
 			want:     4 * time.Second,
 		},
+		{
+			name:     "zero value uses fallback",
+			envValue: "0s",
+			fallback: 4 * time.Second,
+			want:     4 * time.Second,
+		},
+		{
+			name:     "negative value uses fallback",
+			envValue: "-1s",
+			fallback: 4 * time.Second,
+			want:     4 * time.Second,
+		},
 	}
 
 	for _, tt := range tests {
