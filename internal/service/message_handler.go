@@ -172,6 +172,15 @@ func (h *personaHandler) GetPersona(ctx context.Context, msg port.TransportMesse
 		projects = model.MergeProjects(projects, r.projects)
 	}
 
+	// If the handler deadline fired, tell the caller explicitly so it can
+	// distinguish a timed-out response from a genuine "no affiliations" result.
+	if ctx.Err() != nil {
+		slog.WarnContext(ctx, "persona handler timed out — returning partial results as error",
+			"timeout", h.handlerTimeout,
+		)
+		return errorResponse("handler_timeout", "persona detection timed out; upstream sources did not respond in time")
+	}
+
 	resp := model.PersonaResponse{
 		Projects: projects,
 		Error:    nil,

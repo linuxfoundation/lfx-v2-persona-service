@@ -50,9 +50,11 @@ func TestGetPersona_handlerTimeoutCancelsSlowSources(t *testing.T) {
 
 	var resp model.PersonaResponse
 	require.NoError(t, json.Unmarshal(body, &resp))
-	// Sources failed — projects should be empty (autodegrade, not an error response).
+	// Timeout should surface as an explicit error so the caller can distinguish
+	// a timed-out response from a genuine "no affiliations" result.
+	require.NotNil(t, resp.Error)
+	assert.Equal(t, "handler_timeout", resp.Error.Code)
 	assert.Equal(t, []model.Project{}, resp.Projects)
-	assert.Nil(t, resp.Error)
 }
 
 // TestGetPersona_noTimeoutWhenZero verifies that a zero handlerTimeout leaves the
