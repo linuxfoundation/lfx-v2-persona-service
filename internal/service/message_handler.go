@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/linuxfoundation/lfx-v2-persona-service/internal/domain/model"
 	"github.com/linuxfoundation/lfx-v2-persona-service/internal/domain/port"
@@ -19,10 +20,11 @@ import (
 
 // personaHandler implements port.MessageHandler.
 type personaHandler struct {
-	cdpClient   *cdp.Client
-	cdpCache    *cdp.Cache
-	queryClient *query.Client
-	natsClient  *natsclient.NATSClient
+	cdpClient      *cdp.Client
+	cdpCache       *cdp.Cache
+	queryClient    *query.Client
+	natsClient     *natsclient.NATSClient
+	handlerTimeout time.Duration
 }
 
 // PersonaHandlerOption configures the personaHandler.
@@ -44,8 +46,22 @@ func WithQueryService(client *query.Client, nc *natsclient.NATSClient) PersonaHa
 	}
 }
 
+// WithHandlerTimeout sets a deadline on the GetPersona fan-out. All source
+// goroutines share the deadline-bound context, so slow upstream calls are
+// cancelled rather than blocking the response past the caller's NATS timeout.
+func WithHandlerTimeout(d time.Duration) PersonaHandlerOption {
+	return func(h *personaHandler) {
+		h.handlerTimeout = d
+	}
+}
+
 // GetPersona validates the request and fans out to enabled sources.
 func (h *personaHandler) GetPersona(ctx context.Context, msg port.TransportMessenger) ([]byte, error) {
+	if h.handlerTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, h.handlerTimeout)
+		defer cancel()
+	}
 
 	var req model.PersonaRequest
 	if err := json.Unmarshal(msg.Data(), &req); err != nil {
@@ -144,16 +160,63 @@ func (h *personaHandler) GetPersona(ctx context.Context, msg port.TransportMesse
 		close(results)
 	}()
 
+	// Collect results, but stop as soon as the deadline fires. Using select
+	// here is necessary because some dependencies (e.g. the CDP/Auth0 token
+	// provider) use context.Background() internally and will not honour
+	// cancellation — a plain `range results` would block until every goroutine
+	// finishes regardless of the deadline.
 	var projects []model.Project
-	for r := range results {
-		if r.err != nil {
-			slog.ErrorContext(ctx, "source failed, skipping",
-				"source", r.name,
-				"error", r.err,
+collecting:
+	for {
+		select {
+		case r, ok := <-results:
+			if !ok {
+				// Channel closed — all sources finished. But ctx.Done() and the
+				// channel-close can both be ready simultaneously, and Go's select
+				// picks randomly; check the deadline here so a timeout that fired
+				// while draining is never silently swallowed.
+				if ctx.Err() != nil {
+					slog.WarnContext(ctx, "persona handler timed out — returning partial results as error",
+						"timeout", h.handlerTimeout,
+					)
+					return timeoutResponse(projects)
+				}
+				break collecting
+			}
+			if r.err != nil {
+				slog.ErrorContext(ctx, "source failed, skipping",
+					"source", r.name,
+					"error", r.err,
+				)
+				continue
+			}
+			projects = model.MergeProjects(projects, r.projects)
+		case <-ctx.Done():
+			// Drain any results already buffered in the channel — goroutines that
+			// finished just before the deadline may have queued their results
+			// without getting a turn in the select loop yet.
+			for {
+				select {
+				case r, ok := <-results:
+					if !ok {
+						goto done
+					}
+					if r.err == nil {
+						projects = model.MergeProjects(projects, r.projects)
+					}
+				default:
+					goto done
+				}
+			}
+		done:
+			// Tell the caller explicitly so it can distinguish a timed-out
+			// response from a genuine "no affiliations" result. Partial results
+			// are included per the ARCHITECTURE.md timeout contract.
+			slog.WarnContext(ctx, "persona handler timed out — returning partial results as error",
+				"timeout", h.handlerTimeout,
 			)
-			continue
+			return timeoutResponse(projects)
 		}
-		projects = model.MergeProjects(projects, r.projects)
 	}
 
 	resp := model.PersonaResponse{
@@ -350,6 +413,23 @@ func (h *personaHandler) backgroundRefreshAffiliations(memberID string) {
 		return
 	}
 	h.cdpCache.PutAffiliations(ctx, memberID, affiliations)
+}
+
+// timeoutResponse builds a PersonaResponse that signals a handler timeout
+// while preserving any projects collected before the deadline fired,
+// conforming to the partial-results contract in ARCHITECTURE.md.
+func timeoutResponse(projects []model.Project) ([]byte, error) {
+	if projects == nil {
+		projects = []model.Project{}
+	}
+	resp := model.PersonaResponse{
+		Projects: projects,
+		Error: &model.ErrorDetail{
+			Code:    "handler_timeout",
+			Message: "persona detection timed out; upstream sources did not respond in time",
+		},
+	}
+	return json.Marshal(resp)
 }
 
 // errorResponse builds a PersonaResponse with an error and empty projects.

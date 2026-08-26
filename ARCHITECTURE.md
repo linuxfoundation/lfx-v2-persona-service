@@ -175,7 +175,7 @@ A single project entry may carry multiple detections with the same `source` toke
 
 #### `error`
 
-`null` on success. On a hard failure (e.g. upstream NATS timeout, unrecoverable internal error) the response carries a non-null error object and `projects` is empty:
+`null` on success. On a hard failure (e.g. upstream NATS timeout, unrecoverable internal error) the response carries a non-null error object:
 
 ```json
 {
@@ -186,6 +186,20 @@ A single project entry may carry multiple detections with the same `source` toke
   }
 }
 ```
+
+When the handler's own deadline fires before all sources have responded (`handler_timeout`), any projects collected from sources that finished in time are **included** alongside the error — `projects` may be non-empty:
+
+```json
+{
+  "projects": [{ "project_uid": "...", "detections": [...] }],
+  "error": {
+    "code": "handler_timeout",
+    "message": "persona detection timed out; upstream sources did not respond in time"
+  }
+}
+```
+
+Callers must check `error.code` rather than assuming `projects` is empty whenever `error` is non-null.
 
 Partial failures (e.g. CDP returning 404, one Query Service leg timing out) are treated as empty results for the affected source — they do not surface as top-level errors. The service returns whatever it was able to collect.
 
@@ -624,6 +638,7 @@ All configuration is injected via environment variables. Variable names below fo
 | `QUERY_SERVICE_URL` | see notes | Base URL of the Query Service for direct access (e.g. `http://query-service`). Either this or `LFX_BASE_URL` must be set. |
 | `LFX_BASE_URL` | see notes | Base URL of the LFX API gateway (e.g. `https://api-gw.platform.linuxfoundation.org`). Used when `QUERY_SERVICE_URL` is not set; requires Auth0 credentials and `LFX_AUDIENCE`. |
 | `LFX_AUDIENCE` | with `LFX_BASE_URL` | Auth0 audience string for the LFX API gateway. Required when using `LFX_BASE_URL`. |
+| `PERSONA_HANDLER_TIMEOUT` | no | Caps total wall time `GetPersona` waits for all sources before responding (default `4s`). Must stay below the caller's NATS reply timeout (lfx-self-serve uses `5s`). |
 
 ### Autodegradation
 

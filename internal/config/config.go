@@ -6,6 +6,7 @@ package config
 import (
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/linuxfoundation/lfx-v2-persona-service/pkg/constants"
 )
@@ -27,6 +28,10 @@ type Config struct {
 	Auth0M2MPrivateBase64Key string
 	CDPAudience              string
 	CDPBaseURL               string
+
+	// HandlerTimeout caps the total wall time GetPersona waits for all sources.
+	// Defaults to 4s — must stay under the lfx-self-serve caller's 5s NATS timeout.
+	HandlerTimeout time.Duration
 }
 
 // Load reads configuration from environment variables and determines which
@@ -38,6 +43,7 @@ func Load() Config {
 		QueryServiceURL: os.Getenv(constants.QueryServiceURLEnvKey),
 		LFXBaseURL:      os.Getenv(constants.LFXBaseURLEnvKey),
 		LFXAudience:     os.Getenv(constants.LFXAudienceEnvKey),
+		HandlerTimeout:  parseDurationEnv(constants.HandlerTimeoutEnvKey, 4*time.Second),
 	}
 
 	if cfg.QueryServiceURL == "" && cfg.LFXBaseURL == "" {
@@ -73,4 +79,17 @@ func envOrDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func parseDurationEnv(key string, fallback time.Duration) time.Duration {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		slog.Warn("invalid duration env var, using default", "key", key, "value", v, "default", fallback)
+		return fallback
+	}
+	return d
 }

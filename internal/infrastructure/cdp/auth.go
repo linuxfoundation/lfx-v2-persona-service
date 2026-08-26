@@ -24,6 +24,10 @@ import (
 // tokenExpiryBuffer is subtracted from the token expiry so we refresh early.
 const tokenExpiryBuffer = 5 * time.Minute
 
+// tokenFetchTimeout caps how long a single Auth0 token exchange may take.
+// This bounds background goroutines left running after a handler deadline fires.
+const tokenFetchTimeout = 30 * time.Second
+
 // TokenProvider manages Auth0 M2M access tokens using private key JWT
 // (client assertion). Tokens are cached in-process via oauth2.ReuseTokenSource
 // with a 5-minute early-expiry buffer.
@@ -68,12 +72,29 @@ func NewTokenProvider(cfg TokenProviderConfig) (*TokenProvider, error) {
 }
 
 // Token returns a valid access token, using the cache when possible.
+// The underlying oauth2.TokenSource holds a mutex during refresh; running it
+// in a goroutine lets the caller unblock on ctx.Done() while the background
+// goroutine finishes the exchange and warms the cache for subsequent callers.
 func (tp *TokenProvider) Token(ctx context.Context) (string, error) {
-	tok, err := tp.tokenSource.Token()
-	if err != nil {
-		return "", err
+	type result struct {
+		token string
+		err   error
 	}
-	return tok.AccessToken, nil
+	ch := make(chan result, 1)
+	go func() {
+		tok, err := tp.tokenSource.Token()
+		if err != nil {
+			ch <- result{err: err}
+			return
+		}
+		ch <- result{token: tok.AccessToken}
+	}()
+	select {
+	case r := <-ch:
+		return r.token, r.err
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
 }
 
 // assertionTokenSource implements oauth2.TokenSource by signing a fresh
@@ -104,7 +125,9 @@ func (s *assertionTokenSource) Token() (*oauth2.Token, error) {
 		},
 	}
 
-	tok, err := cfg.Token(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), tokenFetchTimeout)
+	defer cancel()
+	tok, err := cfg.Token(ctx)
 	if err != nil {
 		slog.Error("Auth0 token request failed", "error", err, "audience", s.audience)
 		return nil, err
