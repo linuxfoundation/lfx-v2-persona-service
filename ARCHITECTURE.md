@@ -140,11 +140,11 @@ One entry per unique `project_uid`. A project that matches via multiple sources 
 | Token | Source | `extra` fields (when present) |
 |-------|--------|-------------------------------|
 | `board_member` | Board Member — committee query | `committee_uid`, `committee_name`, `committee_member_uid`, `role`, `voting_status`, `organization` (`id`, `name`, `website`) |
-| `executive_director` | Executive Director — project query | _(none)_ |
+| `executive_director` | Executive Director — project_settings query (email or username) | _(none)_ |
 | `cdp_activity` | Source 1 — Snowflake activity | _(none)_ |
 | `cdp_roles` | Source 2 — CDP affiliations | `contributionCount` (number), `roles[]` (passed through as-is from CDP; see shape below) |
-| `writer` | Source 3a — project writer | _(none)_ |
-| `auditor` | Source 3b — project auditor | _(none)_ |
+| `writer` | Source 3a — project writer (email or username) | _(none)_ |
+| `auditor` | Source 3b — project auditor (email or username) | _(none)_ |
 | `committee_member` | Source 4 — non-Board committee membership | `committee_uid`, `committee_name`, `committee_member_uid`, `role` |
 | `mailing_list` | Source 5 — mailing list subscriptions | _(none)_ |
 | `meeting_attendance` | Source 6 — meeting attendance | _(none)_ |
@@ -320,18 +320,33 @@ required to enable this persona:
 
 #### Detection strategy
 
-Once the field is present on the indexed project document, the Persona Service
-queries the Query Service for all projects where
-`data.executive_director.username` matches the requesting user's username:
+Once the field is present on the indexed project_settings document, the Persona Service
+queries the Query Service for all project_settings where the ED record matches the
+requesting user — on email (always runs):
 
 ```
-type=project
+type=project_settings
+filters=executive_director.email:<email>
+```
+
+and on username, in parallel, when the request carries one:
+
+```
+type=project_settings
 filters=executive_director.username:<username>
 ```
 
-A local post-filter against exact username equality must be applied to the
-results for the same reason as the Board Member username leg — the `filters`
-term clause may be overly liberal.
+The email leg exists because the login-session username does not always equal the
+LFID stored by the v1→v2 sync (a contractor account can present a different
+session identity), while the stored ED email matches the session email. Results
+from both legs are merged and de-duplicated by resource ID.
+
+A local post-filter against exact case-insensitive equality on each leg's own
+field (email or username) must be applied to the results for the same reason as
+the Board Member username leg — the `filters` term clause may be overly liberal
+(and is case-sensitive). A source-level error is surfaced only when every leg that ran
+fails (with no username the email leg is the only leg); any surviving leg
+degrades to partial results.
 
 #### What is returned
 
@@ -419,29 +434,44 @@ Any project for which the user holds a `writer` or `auditor` relationship
 is identified via a Query Service term filter against `data.writers` and
 `data.auditors`, which are present on the indexed `project_settings`
 document today. Writers and auditors are arrays of objects with `username`,
-`email`, `name`, and `avatar` fields; the filter uses dot-notation to
-match on the nested `username`:
+`email`, `name`, and `avatar` fields; the filters use dot-notation to
+match on the nested `username` and `email`. Four parallel legs are issued —
+a username leg and an email leg per role; the username legs are skipped when
+the request carries no username:
 
 ```
 type=project_settings
 filters=writers.username:<username>
 ```
 
-and in parallel:
-
 ```
 type=project_settings
 filters=auditors.username:<username>
 ```
 
-Results from both legs are tracked independently. Each leg that matches
-produces its own detection (`writer` or `auditor`). A project where the
-user appears in both `data.writers` and `data.auditors` receives both
-detection tokens on a single project entry. A local exact post-filter
-must be applied per-leg for the same reason as other `filters`-based
-lookups — the term clause may be overly liberal. Each post-filter checks
-only the relevant array (`data.writers` for the writers leg,
-`data.auditors` for the auditors leg) to avoid false positives.
+```
+type=project_settings
+filters=writers.email:<email>
+```
+
+```
+type=project_settings
+filters=auditors.email:<email>
+```
+
+The email legs exist for the same reason as the Executive Director email leg:
+the login-session username does not always equal the stored LFID, while the
+stored email matches the session email. Results from all four legs are tracked
+independently and merged by resource ID. Each leg that matches produces its own
+detection (`writer` or `auditor`). A project where the user appears in both
+`data.writers` and `data.auditors` receives both detection tokens on a single
+project entry. A local exact post-filter must be applied per-leg for the same
+reason as other `filters`-based lookups — the term clause may be overly liberal.
+Each post-filter checks only the relevant array (`data.writers` for the writers
+legs, `data.auditors` for the auditors legs) against the leg's own identity
+field (username or email) to avoid false positives. A source-level error is
+surfaced only when every leg that ran fails — four legs when the request
+carries a username, otherwise the two email legs.
 
 #### Source 3 future extension: Project contacts index
 

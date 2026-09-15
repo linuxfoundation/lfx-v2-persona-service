@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -80,7 +81,7 @@ func (m *staticMessenger) Subject() string      { return "lfx.personas-api.get" 
 func (m *staticMessenger) Data() []byte         { return m.data }
 func (m *staticMessenger) Respond([]byte) error { return nil }
 
-func TestSourceExecutiveDirector_emptyUsernameShortCircuits(t *testing.T) {
+func TestSourceExecutiveDirector_emptyUsernameStillQueriesEmail(t *testing.T) {
 	capture := newQueryRequestCapture(nil)
 	h := testHandlerWithQuery(t, capture)
 
@@ -88,8 +89,12 @@ func TestSourceExecutiveDirector_emptyUsernameShortCircuits(t *testing.T) {
 		Email: "alice@example.com",
 	})
 	require.NoError(t, err)
-	assert.Nil(t, projects)
-	assert.Empty(t, capture.requestsSnapshot())
+	assert.Empty(t, projects)
+
+	requests := capture.requestsSnapshot()
+	require.Len(t, requests, 1)
+	assert.Equal(t, "executive_director.email:alice@example.com", requests[0].filters)
+	assert.NotContains(t, requests[0].filters, "executive_director.username:")
 }
 
 func TestSourceExecutiveDirector_usesUsernameDirectly(t *testing.T) {
@@ -116,9 +121,13 @@ func TestSourceExecutiveDirector_usesUsernameDirectly(t *testing.T) {
 	assert.Equal(t, model.SourceExecutiveDirector, projects[0].Detections[0].Source)
 
 	requests := capture.requestsSnapshot()
-	require.Len(t, requests, 1)
-	assert.Equal(t, "project_settings", requests[0].resourceType)
-	assert.Equal(t, "executive_director.username:carol-lfid", requests[0].filters)
+	require.Len(t, requests, 2)
+	filters := []string{requests[0].filters, requests[1].filters}
+	assert.Contains(t, filters, "executive_director.username:carol-lfid")
+	assert.Contains(t, filters, "executive_director.email:carol@example.com")
+	for _, r := range requests {
+		assert.Equal(t, "project_settings", r.resourceType)
+	}
 }
 
 func TestSourceExecutiveDirector_postFilterRejectsMismatchedUsername(t *testing.T) {
@@ -143,7 +152,83 @@ func TestSourceExecutiveDirector_postFilterRejectsMismatchedUsername(t *testing.
 	assert.Empty(t, projects)
 }
 
-func TestSourceWriterAuditor_emptyUsernameShortCircuits(t *testing.T) {
+func TestSourceExecutiveDirector_emailLegMatches(t *testing.T) {
+	capture := newQueryRequestCapture(map[string][]query.Resource{
+		"project_settings|executive_director.email:alice@example.com|": {
+			{
+				ID: "settings-1",
+				Data: json.RawMessage(`{
+					"uid": "project-1",
+					"executive_director": {"username": "alice-lfid", "email": "alice@example.com"}
+				}`),
+			},
+		},
+	})
+	h := testHandlerWithQuery(t, capture)
+
+	projects, err := h.sourceExecutiveDirector(context.Background(), &model.PersonaRequest{
+		Email: "alice@example.com",
+	})
+	require.NoError(t, err)
+	require.Len(t, projects, 1)
+	assert.Equal(t, "project-1", projects[0].ProjectUID)
+	assert.Equal(t, model.SourceExecutiveDirector, projects[0].Detections[0].Source)
+
+	requests := capture.requestsSnapshot()
+	require.Len(t, requests, 1)
+	assert.Equal(t, "executive_director.email:alice@example.com", requests[0].filters)
+}
+
+func TestSourceExecutiveDirector_postFilterRejectsMismatchedEmail(t *testing.T) {
+	capture := newQueryRequestCapture(map[string][]query.Resource{
+		"project_settings|executive_director.email:alice@example.com|": {
+			{
+				ID: "settings-1",
+				Data: json.RawMessage(`{
+					"uid": "project-1",
+					"executive_director": {"username": "alice-lfid", "email": "other@example.com"}
+				}`),
+			},
+		},
+	})
+	h := testHandlerWithQuery(t, capture)
+
+	projects, err := h.sourceExecutiveDirector(context.Background(), &model.PersonaRequest{
+		Email: "alice@example.com",
+	})
+	require.NoError(t, err)
+	assert.Empty(t, projects)
+}
+
+func TestSourceExecutiveDirector_dualLegDeduplicates(t *testing.T) {
+	resource := query.Resource{
+		ID: "settings-1",
+		Data: json.RawMessage(`{
+			"uid": "project-1",
+			"executive_director": {"username": "alice-lfid", "email": "alice@example.com"}
+		}`),
+	}
+	capture := newQueryRequestCapture(map[string][]query.Resource{
+		"project_settings|executive_director.email:alice@example.com|": {resource},
+		"project_settings|executive_director.username:alice-lfid|":     {resource},
+	})
+	h := testHandlerWithQuery(t, capture)
+
+	projects, err := h.sourceExecutiveDirector(context.Background(), &model.PersonaRequest{
+		Username: "alice-lfid",
+		Email:    "alice@example.com",
+	})
+	require.NoError(t, err)
+	require.Len(t, projects, 1)
+	assert.Equal(t, "project-1", projects[0].ProjectUID)
+	require.Len(t, projects[0].Detections, 1)
+	assert.Equal(t, model.SourceExecutiveDirector, projects[0].Detections[0].Source)
+
+	requests := capture.requestsSnapshot()
+	require.Len(t, requests, 2)
+}
+
+func TestSourceWriterAuditor_emptyUsernameStillQueriesEmail(t *testing.T) {
 	capture := newQueryRequestCapture(nil)
 	h := testHandlerWithQuery(t, capture)
 
@@ -151,8 +236,16 @@ func TestSourceWriterAuditor_emptyUsernameShortCircuits(t *testing.T) {
 		Email: "alice@example.com",
 	})
 	require.NoError(t, err)
-	assert.Nil(t, projects)
-	assert.Empty(t, capture.requestsSnapshot())
+	assert.Empty(t, projects)
+
+	requests := capture.requestsSnapshot()
+	require.Len(t, requests, 2)
+	filters := []string{requests[0].filters, requests[1].filters}
+	assert.Contains(t, filters, "writers.email:alice@example.com")
+	assert.Contains(t, filters, "auditors.email:alice@example.com")
+	for _, r := range requests {
+		assert.NotContains(t, r.filters, ".username:")
+	}
 }
 
 func TestSourceWriterAuditor_usesUsernameDirectly(t *testing.T) {
@@ -188,15 +281,74 @@ func TestSourceWriterAuditor_usesUsernameDirectly(t *testing.T) {
 	require.Len(t, projects, 2)
 
 	requests := capture.requestsSnapshot()
+	require.Len(t, requests, 4)
+	filters := []string{requests[0].filters, requests[1].filters, requests[2].filters, requests[3].filters}
+	assert.Contains(t, filters, "writers.username:carol-lfid")
+	assert.Contains(t, filters, "auditors.username:carol-lfid")
+	assert.Contains(t, filters, "writers.email:carol@example.com")
+	assert.Contains(t, filters, "auditors.email:carol@example.com")
+}
+
+func TestSourceWriterAuditor_emailLegsMatch(t *testing.T) {
+	resource := query.Resource{
+		ID: "settings-1",
+		Data: json.RawMessage(`{
+			"uid": "project-1",
+			"writers": [{"username": "alice-lfid", "email": "alice@example.com"}],
+			"auditors": [{"username": "alice-lfid", "email": "alice@example.com"}]
+		}`),
+	}
+	capture := newQueryRequestCapture(map[string][]query.Resource{
+		"project_settings|writers.email:alice@example.com|":  {resource},
+		"project_settings|auditors.email:alice@example.com|": {resource},
+	})
+	h := testHandlerWithQuery(t, capture)
+
+	projects, err := h.sourceWriterAuditor(context.Background(), &model.PersonaRequest{
+		Email: "alice@example.com",
+	})
+	require.NoError(t, err)
+	require.Len(t, projects, 1)
+	assert.Equal(t, "project-1", projects[0].ProjectUID)
+	require.Len(t, projects[0].Detections, 2)
+	assert.Equal(t, model.SourceWriter, projects[0].Detections[0].Source)
+	assert.Equal(t, model.SourceAuditor, projects[0].Detections[1].Source)
+
+	requests := capture.requestsSnapshot()
 	require.Len(t, requests, 2)
-	assert.Contains(t, []string{
-		requests[0].filters,
-		requests[1].filters,
-	}, "writers.username:carol-lfid")
-	assert.Contains(t, []string{
-		requests[0].filters,
-		requests[1].filters,
-	}, "auditors.username:carol-lfid")
+	filters := []string{requests[0].filters, requests[1].filters}
+	assert.Contains(t, filters, "writers.email:alice@example.com")
+	assert.Contains(t, filters, "auditors.email:alice@example.com")
+}
+
+func TestSourceWriterAuditor_mixedLegsSameProject(t *testing.T) {
+	resource := query.Resource{
+		ID: "settings-1",
+		Data: json.RawMessage(`{
+			"uid": "project-1",
+			"writers": [{"username": "other-user", "email": "carol@example.com"}],
+			"auditors": [{"username": "carol-lfid", "email": "other@example.com"}]
+		}`),
+	}
+	capture := newQueryRequestCapture(map[string][]query.Resource{
+		"project_settings|writers.email:carol@example.com|": {resource},
+		"project_settings|auditors.username:carol-lfid|":    {resource},
+	})
+	h := testHandlerWithQuery(t, capture)
+
+	projects, err := h.sourceWriterAuditor(context.Background(), &model.PersonaRequest{
+		Username: "carol-lfid",
+		Email:    "carol@example.com",
+	})
+	require.NoError(t, err)
+	require.Len(t, projects, 1)
+	assert.Equal(t, "project-1", projects[0].ProjectUID)
+	require.Len(t, projects[0].Detections, 2)
+	assert.Equal(t, model.SourceWriter, projects[0].Detections[0].Source)
+	assert.Equal(t, model.SourceAuditor, projects[0].Detections[1].Source)
+
+	requests := capture.requestsSnapshot()
+	require.Len(t, requests, 4)
 }
 
 func TestQueryCommitteeMembers_usernameLegUsesLFIDUsername(t *testing.T) {
@@ -299,4 +451,128 @@ func TestSourceMeetingAttendance_usernameLegUsesTagLookup(t *testing.T) {
 	requests := capture.requestsSnapshot()
 	require.Len(t, requests, 2)
 	assert.Contains(t, []string{requests[0].tagsAll, requests[1].tagsAll}, "username:carol-lfid")
+}
+
+// queryFailureHandler makes every Query Service call fail, so a source's
+// all-legs-failed branch can be exercised.
+func queryFailureHandler(w http.ResponseWriter, _ *http.Request) {
+	http.Error(w, "upstream unavailable", http.StatusInternalServerError)
+}
+
+func TestSourceExecutiveDirector_allLegsFailReturnsError(t *testing.T) {
+	tests := []struct {
+		name string
+		req  model.PersonaRequest
+	}{
+		{
+			name: "with username",
+			req:  model.PersonaRequest{Username: "carol-lfid", Email: "carol@example.com"},
+		},
+		{
+			// The email leg is the only leg here, so its failure is total and
+			// must still surface rather than reading as "no ED role".
+			name: "without username",
+			req:  model.PersonaRequest{Email: "carol@example.com"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := &personaHandler{queryClient: queryTestClient(t, queryFailureHandler)}
+
+			projects, err := h.sourceExecutiveDirector(context.Background(), &tt.req)
+			require.Error(t, err)
+			assert.Empty(t, projects)
+		})
+	}
+}
+
+func TestSourceExecutiveDirector_singleLegFailureDegrades(t *testing.T) {
+	capture := newQueryRequestCapture(map[string][]query.Resource{
+		"project_settings|executive_director.username:carol-lfid|": {
+			{
+				ID: "settings-1",
+				Data: json.RawMessage(`{
+					"uid": "project-1",
+					"executive_director": {"username": "carol-lfid", "email": "carol@example.com"}
+				}`),
+			},
+		},
+	})
+	// Fail only the email leg; the username leg must still produce results.
+	h := &personaHandler{queryClient: queryTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Query().Get("filters"), "executive_director.email:") {
+			http.Error(w, "upstream unavailable", http.StatusInternalServerError)
+			return
+		}
+		capture.handler()(w, r)
+	})}
+
+	projects, err := h.sourceExecutiveDirector(context.Background(), &model.PersonaRequest{
+		Username: "carol-lfid",
+		Email:    "carol@example.com",
+	})
+	require.NoError(t, err)
+	require.Len(t, projects, 1)
+	assert.Equal(t, "project-1", projects[0].ProjectUID)
+}
+
+func TestSourceWriterAuditor_allLegsFailReturnsError(t *testing.T) {
+	tests := []struct {
+		name string
+		req  model.PersonaRequest
+	}{
+		{
+			name: "with username",
+			req:  model.PersonaRequest{Username: "carol-lfid", Email: "carol@example.com"},
+		},
+		{
+			// Only the two email legs run here, so the all-legs-failed check
+			// must compare against the legs actually issued, not a fixed four.
+			name: "without username",
+			req:  model.PersonaRequest{Email: "carol@example.com"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := &personaHandler{queryClient: queryTestClient(t, queryFailureHandler)}
+
+			projects, err := h.sourceWriterAuditor(context.Background(), &tt.req)
+			require.Error(t, err)
+			assert.Empty(t, projects)
+		})
+	}
+}
+
+func TestSourceWriterAuditor_partialLegFailureDegrades(t *testing.T) {
+	capture := newQueryRequestCapture(map[string][]query.Resource{
+		"project_settings|auditors.email:carol@example.com|": {
+			{
+				ID: "settings-1",
+				Data: json.RawMessage(`{
+					"uid": "project-1",
+					"auditors": [{"username": "other-user", "email": "carol@example.com"}]
+				}`),
+			},
+		},
+	})
+	// Fail every leg except the auditors email leg.
+	h := &personaHandler{queryClient: queryTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("filters") != "auditors.email:carol@example.com" {
+			http.Error(w, "upstream unavailable", http.StatusInternalServerError)
+			return
+		}
+		capture.handler()(w, r)
+	})}
+
+	projects, err := h.sourceWriterAuditor(context.Background(), &model.PersonaRequest{
+		Username: "carol-lfid",
+		Email:    "carol@example.com",
+	})
+	require.NoError(t, err)
+	require.Len(t, projects, 1)
+	assert.Equal(t, "project-1", projects[0].ProjectUID)
+	require.Len(t, projects[0].Detections, 1)
+	assert.Equal(t, model.SourceAuditor, projects[0].Detections[0].Source)
 }

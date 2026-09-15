@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 
@@ -14,63 +15,87 @@ import (
 	"github.com/linuxfoundation/lfx-v2-persona-service/internal/infrastructure/query"
 )
 
-// sourceWriterAuditor queries the Query Service for project resources where
-// the caller's LFX username appears in data.writers or data.auditors. Two
-// parallel filter legs are issued. Each leg produces its own detection token
-// (writer or auditor). A project where the user holds both roles receives both
-// detections on a single project entry. A local exact post-filter is applied
-// per-leg, checking only the relevant array, to guard against overly liberal
-// term matches.
+// sourceWriterAuditor queries the Query Service for project_settings resources
+// where the caller appears in data.writers or data.auditors. Four parallel
+// filter legs are issued: username and email legs per role. The email legs
+// exist because the login-session username does not always equal the LFID
+// stored by the v1→v2 sync, while the stored email does match the session
+// email. Each leg produces its own detection token (writer or auditor). A
+// project where the user holds both roles receives both detections on a
+// single project entry. A local exact post-filter is applied per-leg,
+// checking only the relevant array against the leg's own identity field, to
+// guard against overly liberal term matches.
 func (h *personaHandler) sourceWriterAuditor(ctx context.Context, req *model.PersonaRequest) ([]model.Project, error) {
-	if req.Username == "" {
-		return nil, nil
-	}
-
 	type legResult struct {
 		resources []query.Resource
 		err       error
 	}
 
 	var wg sync.WaitGroup
-	writersCh := make(chan legResult, 1)
-	auditorsCh := make(chan legResult, 1)
+	writersEmailCh := make(chan legResult, 1)
+	writersUsernameCh := make(chan legResult, 1)
+	auditorsEmailCh := make(chan legResult, 1)
+	auditorsUsernameCh := make(chan legResult, 1)
 
-	// Writers leg.
-	wg.Add(1)
-	go func() {
+	search := func(filter string, ch chan<- legResult) {
 		defer wg.Done()
 		resources, err := h.queryClient.Search(ctx, query.SearchParams{
 			Type:    "project_settings",
-			Filters: []string{"writers.username:" + req.Username},
+			Filters: []string{filter},
 		})
-		writersCh <- legResult{resources, err}
-	}()
+		ch <- legResult{resources, err}
+	}
 
-	// Auditors leg.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		resources, err := h.queryClient.Search(ctx, query.SearchParams{
-			Type:    "project_settings",
-			Filters: []string{"auditors.username:" + req.Username},
-		})
-		auditorsCh <- legResult{resources, err}
-	}()
+	// Email legs — always run; username legs are conditional, so track how many
+	// legs were actually issued to decide when every leg has failed.
+	//
+	// writers/auditors are arrays of objects, so the emails are only reachable
+	// via dot-notation `filters` clauses, not the `email:` tag used by the
+	// per-person resource types. Those clauses are case-sensitive, so these legs
+	// assume the indexer stores emails lowercased, matching the handler
+	// normalization in GetPersona.
+	legsRun := 2
+	wg.Add(2)
+	go search("writers.email:"+req.Email, writersEmailCh)
+	go search("auditors.email:"+req.Email, auditorsEmailCh)
+
+	// Username legs — skipped when username is empty.
+	if req.Username != "" {
+		legsRun = 4
+		wg.Add(2)
+		go search("writers.username:"+req.Username, writersUsernameCh)
+		go search("auditors.username:"+req.Username, auditorsUsernameCh)
+	} else {
+		writersUsernameCh <- legResult{}
+		auditorsUsernameCh <- legResult{}
+	}
 
 	wg.Wait()
 
-	writersResult := <-writersCh
-	auditorsResult := <-auditorsCh
+	writersEmailResult := <-writersEmailCh
+	writersUsernameResult := <-writersUsernameCh
+	auditorsEmailResult := <-auditorsEmailCh
+	auditorsUsernameResult := <-auditorsUsernameCh
 
-	if writersResult.err != nil {
-		slog.ErrorContext(ctx, "writer/auditor writers leg failed", "error", writersResult.err)
+	failures := 0
+	var firstErr error
+	logLegFailure := func(label string, err error) {
+		if err == nil {
+			return
+		}
+		failures++
+		if firstErr == nil {
+			firstErr = err
+		}
+		slog.ErrorContext(ctx, "writer/auditor "+label+" leg failed", "error", err)
 	}
-	if auditorsResult.err != nil {
-		slog.ErrorContext(ctx, "writer/auditor auditors leg failed", "error", auditorsResult.err)
-	}
+	logLegFailure("writers.email", writersEmailResult.err)
+	logLegFailure("writers.username", writersUsernameResult.err)
+	logLegFailure("auditors.email", auditorsEmailResult.err)
+	logLegFailure("auditors.username", auditorsUsernameResult.err)
 
-	if writersResult.err != nil && auditorsResult.err != nil {
-		return nil, writersResult.err
+	if failures == legsRun {
+		return nil, firstErr
 	}
 
 	// Track which source token(s) matched per Resource.ID.
@@ -80,31 +105,31 @@ func (h *personaHandler) sourceWriterAuditor(ctx context.Context, req *model.Per
 	}
 	matches := make(map[string]*projectMatch)
 
-	for _, r := range writersResult.resources {
-		if !projectContainsWriter(r.Data, req.Username) {
-			continue
-		}
-		if m, ok := matches[r.ID]; ok {
-			m.sources = append(m.sources, model.SourceWriter)
-		} else {
-			matches[r.ID] = &projectMatch{resource: r, sources: []string{model.SourceWriter}}
+	addLeg := func(resources []query.Resource, source string, contains func(json.RawMessage, string) bool, identity string) {
+		for _, r := range resources {
+			if !contains(r.Data, identity) {
+				continue
+			}
+			if m, ok := matches[r.ID]; ok {
+				if !slices.Contains(m.sources, source) {
+					m.sources = append(m.sources, source)
+				}
+			} else {
+				matches[r.ID] = &projectMatch{resource: r, sources: []string{source}}
+			}
 		}
 	}
 
-	for _, r := range auditorsResult.resources {
-		if !projectContainsAuditor(r.Data, req.Username) {
-			continue
-		}
-		if m, ok := matches[r.ID]; ok {
-			m.sources = append(m.sources, model.SourceAuditor)
-		} else {
-			matches[r.ID] = &projectMatch{resource: r, sources: []string{model.SourceAuditor}}
-		}
-	}
+	addLeg(writersEmailResult.resources, model.SourceWriter, projectContainsWriterEmail, req.Email)
+	addLeg(writersUsernameResult.resources, model.SourceWriter, projectContainsWriter, req.Username)
+	addLeg(auditorsEmailResult.resources, model.SourceAuditor, projectContainsAuditorEmail, req.Email)
+	addLeg(auditorsUsernameResult.resources, model.SourceAuditor, projectContainsAuditor, req.Username)
 
 	slog.DebugContext(ctx, "writer/auditor queries returned",
-		"writers_count", len(writersResult.resources),
-		"auditors_count", len(auditorsResult.resources),
+		"writers_email_count", len(writersEmailResult.resources),
+		"writers_username_count", len(writersUsernameResult.resources),
+		"auditors_email_count", len(auditorsEmailResult.resources),
+		"auditors_username_count", len(auditorsUsernameResult.resources),
 		"matched_projects", len(matches),
 	)
 
@@ -150,6 +175,21 @@ func projectContainsWriter(raw json.RawMessage, username string) bool {
 	return false
 }
 
+// projectContainsWriterEmail checks whether email appears in the project's
+// writers array (case-insensitive).
+func projectContainsWriterEmail(raw json.RawMessage, email string) bool {
+	var data query.ProjectData
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return false
+	}
+	for _, w := range data.Writers {
+		if strings.EqualFold(w.Email, email) {
+			return true
+		}
+	}
+	return false
+}
+
 // projectContainsAuditor checks whether username appears in the project's
 // auditors array (case-insensitive).
 func projectContainsAuditor(raw json.RawMessage, username string) bool {
@@ -159,6 +199,21 @@ func projectContainsAuditor(raw json.RawMessage, username string) bool {
 	}
 	for _, a := range data.Auditors {
 		if strings.EqualFold(a.Username, username) {
+			return true
+		}
+	}
+	return false
+}
+
+// projectContainsAuditorEmail checks whether email appears in the project's
+// auditors array (case-insensitive).
+func projectContainsAuditorEmail(raw json.RawMessage, email string) bool {
+	var data query.ProjectData
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return false
+	}
+	for _, a := range data.Auditors {
+		if strings.EqualFold(a.Email, email) {
 			return true
 		}
 	}

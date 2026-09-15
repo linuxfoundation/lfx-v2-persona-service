@@ -38,8 +38,8 @@ The service fans out to all enabled data sources in parallel. Upstream HTTP clie
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `username` | No* | Auth0 `nickname` / LFX username. May be empty for accounts without a username yet. Sources that match on username are skipped when empty. Must contain only `[a-zA-Z0-9._-]` when provided. |
-| `email` | Yes | Primary email, normalized to lowercase. Used as the primary identity signal for email-based lookups. |
+| `username` | No* | Auth0 `nickname` / LFX username. May be empty for accounts without a username yet. Username-based matching legs are skipped when empty. Must contain only `[a-zA-Z0-9._-]` when provided. |
+| `email` | Yes | Primary email, normalized to lowercase. Used as the primary identity signal for email-based lookups; Executive Director, writer, and auditor sources match on email or username. Must contain only `[a-zA-Z0-9.@_+%-]`. |
 
 \* `email` is strictly required; `username` is optional but unlocks additional matching legs.
 
@@ -98,11 +98,11 @@ The service fans out to all enabled data sources in parallel. Upstream HTTP clie
 | Token | Meaning |
 |-------|---------|
 | `board_member` | Member of a committee with category `Board` |
-| `executive_director` | Executive Director of the project |
+| `executive_director` | Executive Director of the project (matched on email or username) |
 | `cdp_roles` | CDP project affiliation (roles, contribution count) |
 | `cdp_activity` | CDP/Snowflake activity signal *(reserved; not yet implemented)* |
-| `writer` | Project writer (access-control membership) |
-| `auditor` | Project auditor (access-control membership) |
+| `writer` | Project writer (access-control membership; matched on email or username) |
+| `auditor` | Project auditor (access-control membership; matched on email or username) |
 | `committee_member` | Member of any committee, including Board (community engagement signal) |
 | `mailing_list` | Subscribed to a project mailing list |
 | `meeting_attendance` | Invited to or attended a project meeting |
@@ -204,11 +204,12 @@ Below is how each persona is determined and what data backs it.
 
 **How it is calculated:**
 
-1. Skip entirely when `username` is empty.
-2. Query `project_settings` resources: `type=project_settings`, `filters=executive_director.username:<username>`.
-3. Post-filter locally for exact case-insensitive match on `data.executive_director.username`.
-4. Resolve `project_slug` via the project service NATS endpoint `lfx.projects-api.get_slug`.
-5. Emit an `executive_director` detection per matching project (no `extra` fields).
+1. Two parallel Query Service legs against `project_settings`:
+   - `filters=executive_director.email:<email>` — always runs.
+   - `filters=executive_director.username:<username>` — runs when `username` is present.
+2. Post-filter each leg locally for an exact case-insensitive match on its own field (`data.executive_director.email` or `data.executive_director.username`); merge the legs, de-duplicated by resource ID.
+3. Resolve `project_slug` via the project service NATS endpoint `lfx.projects-api.get_slug`.
+4. Emit an `executive_director` detection per matching project (no `extra` fields). A source-level error is returned only when every leg that ran fails (with no username, the email leg is the only leg); any surviving leg degrades to partial results.
 
 **Data dependency:** The `executive_director` field on `project_settings` must be populated (synced from v1 Salesforce via the v1 sync helper and indexed into OpenSearch). See [ARCHITECTURE.md](./ARCHITECTURE.md) for the upstream prerequisites.
 
@@ -241,13 +242,12 @@ Snowflake-backed activity aggregation for projects where the user has recorded c
 
 **How it is calculated:**
 
-1. Skip when `username` is empty.
-2. Two parallel Query Service legs against `project_settings`:
-   - `filters=writers.username:<username>`
-   - `filters=auditors.username:<username>`
-3. Post-filter each leg against the relevant array (`data.writers` or `data.auditors`) for exact case-insensitive username match.
-4. A project where the user is both writer and auditor receives **both** detection tokens on one project entry.
-5. Resolve `project_slug` via `lfx.projects-api.get_slug`.
+1. Four parallel Query Service legs against `project_settings`:
+   - `filters=writers.username:<username>` and `filters=auditors.username:<username>` — run when `username` is present.
+   - `filters=writers.email:<email>` and `filters=auditors.email:<email>` — always run.
+2. Post-filter each leg against the relevant array (`data.writers` or `data.auditors`) for an exact case-insensitive match on the leg's own identity field (username or email).
+3. A project where the user is both writer and auditor receives **both** detection tokens on one project entry. A source-level error is returned only when every leg that ran fails — four legs when the request carries a username, otherwise the two email legs.
+4. Resolve `project_slug` via `lfx.projects-api.get_slug`.
 
 #### Source 4: Committee membership (`committee_member`)
 
