@@ -94,19 +94,30 @@ type CDPRolesExtraRole struct {
 
 // MergeProjects merges detections from src into dst, de-duplicating by ProjectUID.
 // Projects that exist in dst get additional detections appended; new projects
-// are added to the end.
+// are added to the end. Duplicate UIDs already present in dst are normalised
+// (collapsed into a single entry) before src is applied.
 func MergeProjects(dst, src []Project) []Project {
-	idx := make(map[string]int, len(dst))
-	for i, p := range dst {
-		idx[p.ProjectUID] = i
-	}
-	for _, p := range src {
+	idx := make(map[string]int, len(dst)+len(src))
+
+	// Normalise dst: collapse any duplicate UIDs already present in the slice.
+	normalised := make([]Project, 0, len(dst))
+	for _, p := range dst {
 		if i, ok := idx[p.ProjectUID]; ok {
-			dst[i].Detections = append(dst[i].Detections, p.Detections...)
+			normalised[i].Detections = append(normalised[i].Detections, p.Detections...)
 		} else {
-			idx[p.ProjectUID] = len(dst)
-			dst = append(dst, p)
+			idx[p.ProjectUID] = len(normalised)
+			normalised = append(normalised, p)
 		}
 	}
-	return dst
+
+	// Merge src into the normalised dst.
+	for _, p := range src {
+		if i, ok := idx[p.ProjectUID]; ok {
+			normalised[i].Detections = append(normalised[i].Detections, p.Detections...)
+		} else {
+			idx[p.ProjectUID] = len(normalised)
+			normalised = append(normalised, p)
+		}
+	}
+	return normalised
 }
