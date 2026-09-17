@@ -17,6 +17,7 @@ import (
 
 func TestEnvOrDefault_returnsFallbackWhenUnset(t *testing.T) {
 	const key = "TEST_ENVORDEFAULT_UNSET_KEY"
+	t.Setenv(key, "") // isolate from any inherited process env var
 	got := envOrDefault(key, "fallback-value")
 	assert.Equal(t, "fallback-value", got)
 }
