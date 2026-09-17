@@ -113,3 +113,35 @@ func TestMergeProjects_srcHasDuplicateUID(t *testing.T) {
 	assert.Len(t, result, 1)
 	assert.Len(t, result[0].Detections, 2)
 }
+
+func TestMergeProjects_dstHasDuplicateUID(t *testing.T) {
+	// If dst itself contains the same UID twice (e.g. boardMemberDetections
+	// emitting one entry per resource for the same project), MergeProjects must
+	// normalise them into a single entry before applying src, so the response
+	// preserves the one-project-with-multiple-detections contract.
+	dst := []Project{
+		{ProjectUID: "p1", Detections: []Detection{{Source: SourceBoardMember}}},
+		{ProjectUID: "p1", Detections: []Detection{{Source: SourceBoardMember}}},
+	}
+	src := []Project{
+		{ProjectUID: "p1", Detections: []Detection{{Source: SourceCommitteeMember}}},
+	}
+
+	result := MergeProjects(dst, src)
+
+	assert.Len(t, result, 1, "duplicate UIDs in dst must be collapsed into one project")
+	assert.Len(t, result[0].Detections, 3, "all detections from both dst entries and src must be present")
+}
+
+func TestMergeProjects_dstHasDuplicateUID_noSrc(t *testing.T) {
+	// Normalisation must apply even when src is empty.
+	dst := []Project{
+		{ProjectUID: "p1", Detections: []Detection{{Source: SourceBoardMember}}},
+		{ProjectUID: "p1", Detections: []Detection{{Source: SourceCDPRoles}}},
+	}
+
+	result := MergeProjects(dst, nil)
+
+	assert.Len(t, result, 1)
+	assert.Len(t, result[0].Detections, 2)
+}
