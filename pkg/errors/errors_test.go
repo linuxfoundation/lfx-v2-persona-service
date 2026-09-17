@@ -20,7 +20,7 @@ func TestNewValidation_messageOnly(t *testing.T) {
 	assert.Equal(t, "bad input", err.Error())
 }
 
-func TestNewValidation_wrapsError(t *testing.T) {
+func TestNewValidation_composesMessage(t *testing.T) {
 	inner := stderrors.New("inner cause")
 	err := NewValidation("bad input", inner)
 	assert.Equal(t, "bad input: inner cause", err.Error())
@@ -49,7 +49,7 @@ func TestNewNotFound_messageOnly(t *testing.T) {
 	assert.Equal(t, "resource not found", err.Error())
 }
 
-func TestNewNotFound_wrapsError(t *testing.T) {
+func TestNewNotFound_composesMessage(t *testing.T) {
 	inner := stderrors.New("db miss")
 	err := NewNotFound("not found", inner)
 	assert.Equal(t, "not found: db miss", err.Error())
@@ -69,7 +69,7 @@ func TestNewUnexpected_messageOnly(t *testing.T) {
 	assert.Equal(t, "something went wrong", err.Error())
 }
 
-func TestNewUnexpected_wrapsError(t *testing.T) {
+func TestNewUnexpected_composesMessage(t *testing.T) {
 	inner := stderrors.New("panic value")
 	err := NewUnexpected("unexpected", inner)
 	assert.Equal(t, "unexpected: panic value", err.Error())
@@ -89,7 +89,7 @@ func TestNewServiceUnavailable_messageOnly(t *testing.T) {
 	assert.Equal(t, "service down", err.Error())
 }
 
-func TestNewServiceUnavailable_wrapsError(t *testing.T) {
+func TestNewServiceUnavailable_composesMessage(t *testing.T) {
 	inner := stderrors.New("connection refused")
 	err := NewServiceUnavailable("service down", inner)
 	assert.Equal(t, "service down: connection refused", err.Error())

@@ -25,13 +25,13 @@ type fakeKVEntry struct {
 	created time.Time
 }
 
-func (e *fakeKVEntry) Bucket() string                    { return "test-bucket" }
-func (e *fakeKVEntry) Key() string                       { return "" }
-func (e *fakeKVEntry) Value() []byte                     { return e.value }
-func (e *fakeKVEntry) Revision() uint64                  { return 1 }
-func (e *fakeKVEntry) Created() time.Time                { return e.created }
-func (e *fakeKVEntry) Delta() uint64                     { return 0 }
-func (e *fakeKVEntry) Operation() jetstream.KeyValueOp   { return jetstream.KeyValuePut }
+func (e *fakeKVEntry) Bucket() string                  { return "test-bucket" }
+func (e *fakeKVEntry) Key() string                     { return "" }
+func (e *fakeKVEntry) Value() []byte                   { return e.value }
+func (e *fakeKVEntry) Revision() uint64                { return 1 }
+func (e *fakeKVEntry) Created() time.Time              { return e.created }
+func (e *fakeKVEntry) Delta() uint64                   { return 0 }
+func (e *fakeKVEntry) Operation() jetstream.KeyValueOp { return jetstream.KeyValuePut }
 
 // fakeKV is a minimal in-memory KeyValue store.
 // getErr lets individual keys return a specific error on Get.
@@ -119,7 +119,7 @@ func (f *fakeKV) ListKeysFiltered(_ context.Context, _ ...string) (jetstream.Key
 func (f *fakeKV) History(_ context.Context, _ string, _ ...jetstream.WatchOpt) ([]jetstream.KeyValueEntry, error) {
 	return nil, nil
 }
-func (f *fakeKV) Bucket() string { return "test-bucket" }
+func (f *fakeKV) Bucket() string                                                  { return "test-bucket" }
 func (f *fakeKV) PurgeDeletes(_ context.Context, _ ...jetstream.KVPurgeOpt) error { return nil }
 func (f *fakeKV) Status(_ context.Context) (jetstream.KeyValueStatus, error)      { return nil, nil }
 

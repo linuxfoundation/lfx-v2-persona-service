@@ -87,7 +87,7 @@ func TestBoardMemberDetections_emptyInput(t *testing.T) {
 func TestBoardMemberDetections_skipsEmptyProjectUID(t *testing.T) {
 	resources := []query.Resource{
 		{
-			ID:   "member-1",
+			ID: "member-1",
 			Data: mustMarshalCommitteeMember(t, query.CommitteeMemberData{
 				ProjectUID: "", // should be skipped
 			}),
@@ -227,8 +227,6 @@ func TestCommitteeMemberDetections_skipsMalformedJSON(t *testing.T) {
 // ---------------------------------------------------------------------------
 // affiliationsToProjects
 // ---------------------------------------------------------------------------
-
-func strPtr(s string) *string { return &s }
 
 func TestAffiliationsToProjects_emptyInput(t *testing.T) {
 	result, err := affiliationsToProjects(nil, nil)
