@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/linuxfoundation/lfx-v2-persona-service/pkg/constants"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -41,68 +42,75 @@ func TestEnvOrDefault_returnsFallbackWhenEmptyString(t *testing.T) {
 // allCDPVars lists the five environment variables that must all be present
 // for CDP to be enabled.
 var allCDPVars = map[string]string{
-	"AUTH0_ISSUER_BASE_URL":       "https://auth0.example.com/",
-	"AUTH0_CLIENT_ID":             "test-client-id",
-	"AUTH0_M2M_PRIVATE_BASE64_KEY": "dGVzdC1rZXk=",
-	"CDP_AUDIENCE":                "https://cdp.example.com/",
-	"CDP_BASE_URL":                "https://cdp.example.com",
+	constants.Auth0IssuerBaseURLEnvKey:       "https://auth0.example.com/",
+	constants.Auth0ClientIDEnvKey:            "test-client-id",
+	constants.Auth0M2MPrivateBase64KeyEnvKey: "dGVzdC1rZXk=",
+	constants.CDPAudienceEnvKey:              "https://cdp.example.com/",
+	constants.CDPBaseURLEnvKey:               "https://cdp.example.com",
 }
 
-func setEnvVars(t *testing.T, vars map[string]string) {
+// setCDPVars clears every CDP env key first, then sets the provided subset.
+// Clearing first ensures tests are isolated even when CDP credentials are
+// exported in the developer's shell (e.g. via `source .env`).
+func setCDPVars(t *testing.T, vars map[string]string) {
 	t.Helper()
+	for k := range allCDPVars {
+		t.Setenv(k, "")
+	}
 	for k, v := range vars {
 		t.Setenv(k, v)
 	}
 }
 
 func TestLoad_CDPDisabledByDefault(t *testing.T) {
-	// No CDP vars set → CDPEnabled must be false.
+	// Clear all CDP vars to ensure isolation from developer shell env.
+	setCDPVars(t, nil)
 	cfg := Load()
 	assert.False(t, cfg.CDPEnabled)
 }
 
 func TestLoad_CDPEnabledWhenAllVarsPresent(t *testing.T) {
-	setEnvVars(t, allCDPVars)
+	setCDPVars(t, allCDPVars)
 	cfg := Load()
 	assert.True(t, cfg.CDPEnabled)
 }
 
 func TestLoad_CDPDisabledWhenAuth0IssuerMissing(t *testing.T) {
 	vars := copyMap(allCDPVars)
-	delete(vars, "AUTH0_ISSUER_BASE_URL")
-	setEnvVars(t, vars)
+	delete(vars, constants.Auth0IssuerBaseURLEnvKey)
+	setCDPVars(t, vars)
 	cfg := Load()
 	assert.False(t, cfg.CDPEnabled)
 }
 
 func TestLoad_CDPDisabledWhenClientIDMissing(t *testing.T) {
 	vars := copyMap(allCDPVars)
-	delete(vars, "AUTH0_CLIENT_ID")
-	setEnvVars(t, vars)
+	delete(vars, constants.Auth0ClientIDEnvKey)
+	setCDPVars(t, vars)
 	cfg := Load()
 	assert.False(t, cfg.CDPEnabled)
 }
 
 func TestLoad_CDPDisabledWhenPrivateKeyMissing(t *testing.T) {
 	vars := copyMap(allCDPVars)
-	delete(vars, "AUTH0_M2M_PRIVATE_BASE64_KEY")
-	setEnvVars(t, vars)
+	delete(vars, constants.Auth0M2MPrivateBase64KeyEnvKey)
+	setCDPVars(t, vars)
 	cfg := Load()
 	assert.False(t, cfg.CDPEnabled)
 }
 
 func TestLoad_CDPDisabledWhenCDPAudienceMissing(t *testing.T) {
 	vars := copyMap(allCDPVars)
-	delete(vars, "CDP_AUDIENCE")
-	setEnvVars(t, vars)
+	delete(vars, constants.CDPAudienceEnvKey)
+	setCDPVars(t, vars)
 	cfg := Load()
 	assert.False(t, cfg.CDPEnabled)
 }
 
 func TestLoad_CDPDisabledWhenCDPBaseURLMissing(t *testing.T) {
 	vars := copyMap(allCDPVars)
-	delete(vars, "CDP_BASE_URL")
-	setEnvVars(t, vars)
+	delete(vars, constants.CDPBaseURLEnvKey)
+	setCDPVars(t, vars)
 	cfg := Load()
 	assert.False(t, cfg.CDPEnabled)
 }
@@ -112,12 +120,13 @@ func TestLoad_CDPDisabledWhenCDPBaseURLMissing(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestLoad_NATSURLDefaultsToLocalhost(t *testing.T) {
+	t.Setenv(constants.NATSURLEnvKey, "") // isolate from developer shell env
 	cfg := Load()
 	assert.Equal(t, "nats://localhost:4222", cfg.NATSURL)
 }
 
 func TestLoad_NATSURLFromEnv(t *testing.T) {
-	t.Setenv("NATS_URL", "nats://custom-host:4222")
+	t.Setenv(constants.NATSURLEnvKey, "nats://custom-host:4222")
 	cfg := Load()
 	assert.Equal(t, "nats://custom-host:4222", cfg.NATSURL)
 }
@@ -127,6 +136,7 @@ func TestLoad_NATSURLFromEnv(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestLoad_HandlerTimeoutDefaultsFourSeconds(t *testing.T) {
+	t.Setenv(constants.HandlerTimeoutEnvKey, "") // isolate from developer shell env
 	cfg := Load()
 	assert.Equal(t, 4*time.Second, cfg.HandlerTimeout)
 }

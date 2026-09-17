@@ -49,6 +49,7 @@ func TestSourceWriterAuditor_sameProjectBothRoles(t *testing.T) {
 
 	p := projects[0]
 	assert.Equal(t, "proj-dual", p.ProjectUID)
+	assert.Len(t, p.Detections, 2, "expected exactly one detection per role")
 
 	sources := make([]string, 0, len(p.Detections))
 	for _, d := range p.Detections {

@@ -310,6 +310,7 @@ func TestAffiliationsToProjects_allFieldsMapped(t *testing.T) {
 	assert.Equal(t, "2024-01-01", extra.Roles[0].StartDate)
 	assert.Nil(t, extra.Roles[0].EndDate)
 	assert.Equal(t, "https://github.com/torvalds/linux", extra.Roles[0].RepoURL)
+	assert.Equal(t, "https://github.com/torvalds/linux/blob/main/MAINTAINERS", extra.Roles[0].RepoFileURL)
 	assert.Equal(t, "reviewer", extra.Roles[1].Role)
 	require.NotNil(t, extra.Roles[1].EndDate)
 	assert.Equal(t, "2025-12-31", *extra.Roles[1].EndDate)
