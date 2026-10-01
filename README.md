@@ -305,7 +305,7 @@ A user may qualify for multiple personas on the same project. The UI chooses whi
 
 ### Prerequisites
 
-- Go 1.25+
+- Go 1.26.0+
 - [NATS](https://nats.io/) server (local or cluster)
 - Optionally: Query Service (direct URL or LFX API gateway), CDP API credentials
 
