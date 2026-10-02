@@ -84,7 +84,7 @@ gen/                          Goa-generated code — DO NOT EDIT BY HAND
 
 ## 3. Tech stack
 
-- **Go 1.25.0** (`go.mod`, `Makefile` `GO_VERSION := 1.25.0`).
+- **Go 1.26.0** (`go.mod`, `Makefile` `GO_VERSION := 1.26.0`).
 - Framework: **Goa v3.23.3** (`goa.design/goa/v3`) — used only for the HTTP health scaffolding. Persona NATS handling is intentionally hand-rolled.
 - NATS: `github.com/nats-io/nats.go v1.45.0` (core + JetStream KV).
 - Testing: `github.com/stretchr/testify` (assert + require). No mock framework — hand-rolled `httptest` fakes and interface stubs.
@@ -159,7 +159,7 @@ Container:
 
 ## 7. Local development
 
-Prereqs: Go 1.25+, a running NATS server, and optionally Query Service / CDP credentials.
+Prereqs: Go 1.26.0+, a running NATS server, and optionally Query Service / CDP credentials.
 
 ```bash
 make setup && make apigen
