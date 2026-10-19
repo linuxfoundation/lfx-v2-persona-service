@@ -89,7 +89,7 @@ gen/                          Goa-generated code — DO NOT EDIT BY HAND
 - NATS: `github.com/nats-io/nats.go v1.45.0` (core + JetStream KV).
 - Testing: `github.com/stretchr/testify` (assert + require). No mock framework — hand-rolled `httptest` fakes and interface stubs.
 - Auth: `github.com/golang-jwt/jwt/v5` + `golang.org/x/oauth2` for Auth0 private-key-JWT client credentials.
-- Observability: OpenTelemetry v1.44.0 — `autoexport`, `autoprop`, `otelhttp`, `remychantenay/slog-otel`.
+- Observability: OpenTelemetry v1.46.0 — `autoexport`, `autoprop`, `otelhttp`, `remychantenay/slog-otel`.
 - Container builds: **`ko`** from `./cmd/server` (`.ko.yaml`), with `Version`/`BuildTime`/`GitCommit` ldflags. A Chainguard-based `Dockerfile` is available as a fallback.
 - K8s: Helm chart at `charts/lfx-v2-persona-service/`. Image: `ghcr.io/linuxfoundation/lfx-v2-persona-service/server`. ArgoCD manifests live in `linuxfoundation/lfx-v2-argocd`.
 
@@ -207,6 +207,7 @@ make run       # or `make debug` for -d debug logging
 - CDP token provider uses Auth0 **private-key JWT (RS256)**; the key is base64-encoded PKCS in `AUTH0_M2M_PRIVATE_BASE64_KEY`. The same provider is reused for LFX API gateway auth with a different audience/scope.
 - KV cache uses `PutString`, relies on bucket TTL (24h), and layers a 10-minute app-level stale-while-revalidate on top.
 - `Makefile` has `GOOS := linux, GOARCH := amd64` near the top — informational only; `make build` builds for the host OS.
+- When bumping `go.opentelemetry.io/otel/sdk`, also bump the `semconv/vX` import in `pkg/utils/otel.go` to the version the SDK's `resource` package uses. A mismatch makes `resource.Merge` fail with "conflicting Schema URL" and the service exits at startup (`TestSetupOTelSDK` catches this).
 
 ---
 
