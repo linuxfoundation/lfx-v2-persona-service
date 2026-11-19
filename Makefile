@@ -12,12 +12,12 @@ DOCKER_IMAGE := $(DOCKER_REGISTRY)/$(APP_NAME)
 DOCKER_TAG := $(VERSION)
 
 # Go
-GO_VERSION := 1.26.0
+GO_VERSION := 1.27.4
 GOOS := linux
 GOARCH := amd64
 
 # Linting
-GOLANGCI_LINT_VERSION := v2.2.2
+GOLANGCI_LINT_VERSION := v2.15.0
 LINT_TIMEOUT := 10m
 LINT_TOOL=$(shell go env GOPATH)/bin/golangci-lint
 GO_FILES=$(shell find . -name '*.go' -not -path './gen/*' -not -path './vendor/*')
