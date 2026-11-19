@@ -108,7 +108,9 @@ set `GOTOOLCHAIN: auto` in the MegaLinter step's `env:`: the v10.2.0 image runs
 Go 1.26.10, so its Go linters must download the `go.mod` toolchain. Its bundled
 golangci-lint 2.15.0 is built with Go 1.27.0 and can lint this module. For the
 same reason, local `make lint` needs golangci-lint v2.15.0 or newer
-(`GOLANGCI_LINT_VERSION` in the `Makefile`).
+(`GOLANGCI_LINT_VERSION` in the `Makefile`). `make lint` runs whichever
+golangci-lint is on `PATH`, so if you installed an older one, rerun
+`make setup-dev`.
 
 ---
 
