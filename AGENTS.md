@@ -84,7 +84,7 @@ gen/                          Goa-generated code — DO NOT EDIT BY HAND
 
 ## 3. Tech stack
 
-- **Go 1.26.11** (`go.mod`, `Makefile` `GO_VERSION := 1.26.11`).
+- **Go 1.27.4** (`go.mod`, `Makefile` `GO_VERSION := 1.27.4`).
 - Framework: **Goa v3.23.3** (`goa.design/goa/v3`) — used only for the HTTP health scaffolding. Persona NATS handling is intentionally hand-rolled.
 - NATS: `github.com/nats-io/nats.go v1.45.0` (core + JetStream KV).
 - Testing: `github.com/stretchr/testify` (assert + require). No mock framework — hand-rolled `httptest` fakes and interface stubs.
@@ -93,6 +93,23 @@ gen/                          Goa-generated code — DO NOT EDIT BY HAND
 - Container builds: **`ko`** from `./cmd/server` (`.ko.yaml`), with `Version`/`BuildTime`/`GitCommit` ldflags. A Chainguard-based `Dockerfile` is available as a fallback.
 - K8s: Helm chart at `charts/lfx-v2-persona-service/`. Image: `ghcr.io/linuxfoundation/lfx-v2-persona-service/server`. ArgoCD manifests live in `linuxfoundation/lfx-v2-argocd`.
 
+### Go version
+
+This repo targets Go 1.27.x (currently 1.27.4, the latest patch). This
+supersedes the Go version policy in the `lfx-megalinter` skill, which targets
+the latest stable minor minus one: don't move `go.mod` back to Go 1.26. Take
+every 1.27.x patch release, and update `go.mod`, `GO_VERSION` in the
+`Makefile`, this file and `README.md` together. Release images are built by
+`ko-build-tag.yaml`, whose `setup-go` step reads `go-version-file: go.mod`, so
+the `go` directive is the Go a release ships with.
+
+This repo has no MegaLinter workflow. If one is added, use v10.2.0 or later and
+set `GOTOOLCHAIN: auto` in the MegaLinter step's `env:`: the v10.2.0 image runs
+Go 1.26.10, so its Go linters must download the `go.mod` toolchain. Its bundled
+golangci-lint 2.15.0 is built with Go 1.27.0 and can lint this module. For the
+same reason, local `make lint` needs golangci-lint v2.15.0 or newer
+(`GOLANGCI_LINT_VERSION` in the `Makefile`).
+
 ---
 
 ## 4. Make targets
@@ -100,7 +117,7 @@ gen/                          Goa-generated code — DO NOT EDIT BY HAND
 Development / setup:
 
 - `make setup` — `go mod download && go mod tidy`.
-- `make setup-dev` — install `golangci-lint v2.2.2`.
+- `make setup-dev` — install `golangci-lint v2.15.0`.
 - `make deps` — install Goa CLI.
 - `make apigen` — regenerate `gen/` from `cmd/server/design`.
 
@@ -159,7 +176,7 @@ Container:
 
 ## 7. Local development
 
-Prereqs: Go 1.26.11+, a running NATS server, and optionally Query Service / CDP credentials.
+Prereqs: Go 1.27.4+, a running NATS server, and optionally Query Service / CDP credentials.
 
 ```bash
 make setup && make apigen
